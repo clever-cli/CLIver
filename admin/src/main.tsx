@@ -70,6 +70,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="mcp-servers" element={<MCPServersPage />} />
               <Route path="adapters" element={<AdaptersList />} />
               <Route path="settings" element={<ConfigPage />} />
+              <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
             </Route>
           </Routes>
         </BrowserRouter>

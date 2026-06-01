@@ -24,7 +24,10 @@ def get_spa_routes(spa_dist_dir: Path) -> list:
 
     async def handle_spa_assets(request: Request):
         file_path = request.path_params.get("path", "")
-        full_path = (spa_dist_dir / file_path).resolve()
+        # Vite outputs assets to an "assets/" subdirectory inside outDir.
+        # The route /admin/assets/{path} consumes "assets/" from the URL,
+        # so we must add it back when resolving the on-disk path.
+        full_path = (spa_dist_dir / "assets" / file_path).resolve()
         if not str(full_path).startswith(str(spa_dist_dir.resolve())):
             return Response("Forbidden", status_code=403)
         if not full_path.exists() or not full_path.is_file():

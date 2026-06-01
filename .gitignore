@@ -182,7 +182,7 @@ temp/
 CLAUDE.md
 claude.prompt.txt
 .DS_Store
-assets
+/assets
 generated_images
 docs/wbs/
 

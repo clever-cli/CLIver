@@ -265,7 +265,6 @@ class Gateway:
                 task_manager=self._task_manager,
                 run_store=self._run_store,
                 run_task_fn=self._run_task,
-                db_path=db_path,
             )
             if self._scheduler:
                 self._scheduler.validate_tasks()

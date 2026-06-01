@@ -1,6 +1,8 @@
-"""Task scheduler backed by APScheduler + SQLAlchemy.
+"""Task scheduler backed by APScheduler (AsyncIOScheduler).
 
-Jobs are persisted in cliver.db via SQLAlchemyJobStore.
+Jobs are synced from task configuration on startup and every 10 minutes.
+Uses MemoryJobStore (default) — DB persistence is unnecessary since
+sync_tasks() rebuilds all jobs from config on every startup.
 Supports one-shot (run_at) and recurring (cron) tasks.
 """
 
@@ -8,14 +10,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable, Coroutine
 
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
-from sqlalchemy import create_engine
 
 from cliver.gateway.task_store import TaskStore
 from cliver.task_manager import TaskDefinition, TaskManager
@@ -26,10 +25,13 @@ RunTaskFn = Callable[[TaskDefinition], Coroutine[Any, Any, None]]
 
 
 class Scheduler:
-    """Wraps APScheduler with job persistence in cliver.db.
+    """Wraps APScheduler (AsyncIOScheduler) with in-memory job storage.
 
     Tasks are synced on startup via sync_tasks(). Every registered task
     gets a scheduled job — one-shot (run_at) or recurring (cron).
+
+    Uses MemoryJobStore (the APScheduler default) because all jobs are
+    rebuilt from configuration on every startup — no DB persistence needed.
     """
 
     def __init__(
@@ -37,15 +39,14 @@ class Scheduler:
         task_manager: TaskManager,
         run_store: TaskStore,
         run_task_fn: RunTaskFn,
-        db_path: Path,
     ):
         self._task_manager = task_manager
         self._run_store = run_store
         self._run_task_fn = run_task_fn
 
-        engine = create_engine(f"sqlite:///{db_path}")
-        jobstores = {"default": SQLAlchemyJobStore(engine=engine)}
-        self._scheduler = AsyncIOScheduler(jobstores=jobstores)
+        # Use default MemoryJobStore — jobs are rebuilt from config
+        # on every startup via sync_tasks(), so DB persistence isn't needed.
+        self._scheduler = AsyncIOScheduler()
 
     def start(self) -> None:
         self._scheduler.start()
