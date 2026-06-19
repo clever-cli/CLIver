@@ -178,8 +178,15 @@ class OpenAIEngine(ProtocolEngine):
             )
         )
 
+        cliver_msg = self.extract_cliver_message(choice)
+        # Store raw SDK response for diagnostic display
+        try:
+            cliver_msg.vendor_ext["__llm_raw_response__"] = response.model_dump()
+        except Exception:
+            pass
+
         return CLIverResponse(
-            message=self.extract_cliver_message(choice),
+            message=cliver_msg,
             usage=usage,
         )
 

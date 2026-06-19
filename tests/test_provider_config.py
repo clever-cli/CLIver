@@ -55,48 +55,41 @@ class TestModelConfigProviderResolution:
     def test_url_from_provider(self):
         prov = self._make_provider()
         mc = ModelConfig(name="m1", provider="mm", model="m1")
-        mc._provider_config = prov
-        assert mc.get_resolved_url() == "https://api.mm.com/v1"
+        assert mc.get_resolved_url(pc=prov) == "https://api.mm.com/v1"
 
     def test_url_always_from_provider(self):
         """URL always comes from provider config; model has no url field."""
         prov = self._make_provider()
         mc = ModelConfig(name="m1", provider="mm", model="m1")
-        mc._provider_config = prov
-        assert mc.get_resolved_url() == "https://api.mm.com/v1"
+        assert mc.get_resolved_url(pc=prov) == "https://api.mm.com/v1"
 
     def test_api_key_from_provider(self):
         prov = self._make_provider()
         mc = ModelConfig(name="m1", provider="mm", model="m1")
-        mc._provider_config = prov
-        assert mc.get_api_key() == "sk-prov"
+        assert mc.get_api_key(pc=prov) == "sk-prov"
 
     def test_api_key_always_from_provider(self):
         """API key always comes from provider config; model has no api_key field."""
         prov = self._make_provider(api_key="sk-new")
         mc = ModelConfig(name="m1", provider="mm", model="m1")
-        mc._provider_config = prov
-        assert mc.get_api_key() == "sk-new"
+        assert mc.get_api_key(pc=prov) == "sk-new"
 
-    def test_provider_type(self):
+    def test_provider_protocol(self):
         prov = self._make_provider(type="anthropic")
         mc = ModelConfig(name="m1", provider="mm", model="m1")
-        mc._provider_config = prov
-        assert mc.get_provider_type() == "anthropic"
+        assert mc.get_provider_protocol(pc=prov) == "anthropic"
 
-    def test_provider_type_legacy(self):
-        """Without a linked ProviderConfig, provider field IS the type."""
+    def test_provider_protocol_default(self):
+        """Without a ProviderConfig, defaults to 'openai'."""
         mc = ModelConfig(name="m1", provider="openai", model="m1")
-        assert mc.get_provider_type() == "openai"
+        assert mc.get_provider_protocol() == "openai"
 
     def test_resolved_url_no_provider_no_url(self):
         mc = ModelConfig(name="m1", provider="openai", model="m1")
         assert mc.get_resolved_url() is None
 
-    def test_model_dump_excludes_provider_config(self):
-        prov = self._make_provider()
+    def test_model_dump_no_internal_fields(self):
         mc = ModelConfig(name="m1", provider="mm", model="m1")
-        mc._provider_config = prov
         dumped = mc.model_dump()
         assert "_provider_config" not in dumped
 
@@ -133,9 +126,10 @@ class TestConfigLoadingWithProviders:
         assert prov.rate_limit.requests == 5000
 
         m1 = cm.all_models()["MiniMax-M2.7"]
-        assert m1.get_provider_type() == "openai"
-        assert m1.get_resolved_url() == "https://api.minimaxi.com/v1"
-        assert m1.get_api_key() == "sk-test"
+        pc = cm.get_provider_config(m1.provider)
+        assert m1.get_provider_protocol(pc) == "openai"
+        assert m1.get_resolved_url(pc) == "https://api.minimaxi.com/v1"
+        assert m1.get_api_key(pc) == "sk-test"
 
 
 class TestModelsLinkedToProvider:
@@ -165,9 +159,10 @@ class TestModelsLinkedToProvider:
 
         cm = ConfigManager(tmp_path)
         m = cm.all_models()["qwen3"]
-        assert m.get_provider_type() == "openai"
-        assert m.get_resolved_url() == "http://localhost:8080/v1"
-        assert m.get_api_key() == "sk-old"
+        pc = cm.get_provider_config(m.provider)
+        assert m.get_provider_protocol(pc) == "openai"
+        assert m.get_resolved_url(pc) == "http://localhost:8080/v1"
+        assert m.get_api_key(pc) == "sk-old"
 
     def test_models_share_provider(self, tmp_path):
         """Multiple models under the same provider share the same ProviderConfig."""
@@ -194,4 +189,5 @@ class TestModelsLinkedToProvider:
         cm = ConfigManager(tmp_path)
         m1 = cm.all_models()["m1"]
         m2 = cm.all_models()["m2"]
-        assert m1._provider_config is m2._provider_config
+        # Both models reference the same provider — resolve to the same ProviderConfig.
+        assert cm.get_provider_config(m1.provider) is cm.get_provider_config(m2.provider)

@@ -12,6 +12,14 @@ import { cn } from "@/lib/utils";
 import { MarkdownView } from "@/components/markdown-view";
 import { useTranslation } from "@/i18n";
 
+interface TurnMessage {
+  role: string;
+  content: string | null;
+  id?: string;
+  tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }>;
+  vendor_ext?: Record<string, unknown>;
+}
+
 interface TurnData {
   role: string;
   content: string;
@@ -22,6 +30,7 @@ interface TurnData {
   tool_call_id?: string;
   tool_name?: string;
   media?: Array<{ type: string; path: string; mime?: string }>;
+  message?: TurnMessage;
 }
 
 function ReasoningBlock({ content }: { content: string }) {
@@ -89,10 +98,97 @@ function MediaBlock({ media, sessionSource, sessionId }: {
   );
 }
 
+function ProviderDataPanel({ vendorExt }: { vendorExt?: Record<string, unknown> }) {
+  const [open, setOpen] = useState(false);
+  const trace = vendorExt?.__llm_trace__ as Array<Record<string, unknown>> | undefined;
+  if (!trace || trace.length === 0) return null;
+
+  return (
+    <div className="mt-3 border-t pt-2">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        Provider Communication ({trace.length} iteration{trace.length > 1 ? "s" : ""})
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {trace.map((iteration, i) => (
+            <IterationDetail key={i} iteration={iteration} index={i} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IterationDetail({ iteration, index }: { iteration: Record<string, unknown>; index: number }) {
+  const [open, setOpen] = useState(false);
+  const model = iteration.model as string;
+  const provider = iteration.provider as string;
+  const request = iteration.request;
+  const response = iteration.response;
+  const message = iteration.message;
+
+  return (
+    <div className="border rounded-md text-xs">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-accent/50 transition-colors rounded-md text-left"
+      >
+        {open ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+        <Badge variant="secondary" className="text-[10px]">Iteration {index + 1}</Badge>
+        <span className="text-muted-foreground">{model}</span>
+        {provider && <span className="text-muted-foreground">({provider})</span>}
+      </button>
+      {open && (
+        <div className="px-2 pb-2 space-y-1.5">
+          {request != null && (
+            <JsonBlock label="Request" data={request} />
+          )}
+          {response != null && (
+            <JsonBlock label="Raw Response" data={response} />
+          )}
+          {message != null && (
+            <JsonBlock label="Parsed Message" data={message} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JsonBlock({ label, data }: { label: string; data: unknown }) {
+  const [open, setOpen] = useState(false);
+  const jsonStr = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        {label}
+      </button>
+      {open && (
+        <pre className="mt-1 p-2 bg-muted/50 rounded text-[11px] max-h-60 overflow-auto whitespace-pre-wrap">
+          {jsonStr}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function TurnCard({ turn, sessionId }: { turn: TurnData; sessionId?: string }) {
   const isUser = turn.role === "user";
   const isTool = turn.role === "tool";
-  const reasoning = turn.additional_kwargs?.reasoning_content as string | undefined;
+  const msg = turn.message;
+  const vendorExt = msg?.vendor_ext;
+  const reasoning = (vendorExt?.reasoning_content as string) || (turn.additional_kwargs?.reasoning_content as string);
+  const messageToolCalls = msg?.tool_calls?.map((tc) => ({ name: tc.name, args: tc.args, id: tc.id }));
+  const displayToolCalls = messageToolCalls || turn.tool_calls;
 
   if (isTool) {
     return (
@@ -135,8 +231,9 @@ function TurnCard({ turn, sessionId }: { turn: TurnData; sessionId?: string }) {
             </div>
             {reasoning && <ReasoningBlock content={reasoning} />}
             <MarkdownView content={turn.content} />
-            <ToolCallsBlock calls={turn.tool_calls} />
+            <ToolCallsBlock calls={displayToolCalls} />
             <MediaBlock media={turn.media} sessionId={sessionId} />
+            {!isUser && <ProviderDataPanel vendorExt={vendorExt} />}
           </div>
         </div>
       </CardContent>

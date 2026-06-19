@@ -152,6 +152,7 @@ class AgentCore:
         max_iterations: int,
     ) -> CLIverResponse:
         consecutive_errors = 0
+        diagnostic_trace: list[dict] = []
 
         for _iteration in range(max_iterations):
             request = CLIverRequest(
@@ -164,27 +165,39 @@ class AgentCore:
             response = await self.provider.chat(request)
             msg = response.message
 
+            # Collect diagnostic data for this Re-Act iteration
+            diagnostic_trace.append(
+                {
+                    "iteration": _iteration,
+                    "model": self.model,
+                    "provider": self.provider.provider_name(),
+                    "request": msg.vendor_ext.pop("__llm_request__", None),
+                    "response": msg.vendor_ext.pop("__llm_raw_response__", None),
+                    "message": msg.model_dump(exclude_none=True),
+                }
+            )
+
             if not msg.tool_calls:
+                msg.vendor_ext["__llm_trace__"] = diagnostic_trace
                 return response
 
             messages.append(msg)
             consecutive_errors, stop = await self._execute_tool_calls(messages, msg.tool_calls, consecutive_errors)
             if stop:
-                return CLIverResponse(
-                    message=CLIverMessage(
-                        role="assistant",
-                        content="Tool calls failed repeatedly. Please check the tool arguments or try a different "
-                        "approach.",
-                    ),
-                    usage=response.usage,
+                error_msg = CLIverMessage(
+                    role="assistant",
+                    content="Tool calls failed repeatedly. Please check the tool arguments or try a different "
+                    "approach.",
                 )
+                error_msg.vendor_ext["__llm_trace__"] = diagnostic_trace
+                return CLIverResponse(message=error_msg, usage=response.usage)
 
-        return CLIverResponse(
-            message=CLIverMessage(
-                role="assistant",
-                content="Reached maximum iterations without a final answer.",
-            ),
+        max_msg = CLIverMessage(
+            role="assistant",
+            content="Reached maximum iterations without a final answer.",
         )
+        max_msg.vendor_ext["__llm_trace__"] = diagnostic_trace
+        return CLIverResponse(message=max_msg)
 
     # ── Re-Act Loop (streaming) ───────────────────────────────
 
@@ -195,7 +208,10 @@ class AgentCore:
         options: dict[str, Any],
         max_iterations: int,
     ) -> AsyncIterator[CLIverMessageChunk]:
+        import json
+
         consecutive_errors = 0
+        diagnostic_trace: list[dict] = []
 
         for _iteration in range(max_iterations):
             request = CLIverRequest(
@@ -224,10 +240,42 @@ class AgentCore:
                     )
 
             tool_calls = tool_acc.finalize()
+            vendor = {k: v for k, v in vendor_buffers.items() if v}
+
+            # Collect diagnostic data for this streaming iteration.
+            # We don't have __llm_request__ / __llm_raw_response__ from the
+            # streaming engine path, but we capture what we can.
+            diagnostic_trace.append(
+                {
+                    "iteration": _iteration,
+                    "model": self.model,
+                    "provider": self.provider.provider_name(),
+                    "request": {
+                        "model": request.model,
+                        "options": request.options,
+                        "system_prompt": next(
+                            (m.content for m in request.messages if m.role == "system"),
+                            None,
+                        ),
+                        "messages": [m.model_dump(exclude_none=True) for m in request.messages],
+                        "tools": [t.model_dump(exclude={"execute"}) for t in (request.tools or [])],
+                    },
+                    "message": {
+                        "role": "assistant",
+                        "content": "".join(content_parts) if content_parts else None,
+                        "tool_calls": [tc.model_dump(exclude_none=True) for tc in (tool_calls or [])],
+                        "vendor_ext": vendor,
+                    },
+                }
+            )
+
             if not tool_calls:
+                # Final answer — emit trace as a sentinel chunk
+                yield CLIverMessageChunk(
+                    vendor_ext={"__llm_trace__": json.dumps(diagnostic_trace)},
+                )
                 return
 
-            vendor = {k: v for k, v in vendor_buffers.items() if v}
             messages.append(
                 CLIverMessage(
                     role="assistant",
@@ -243,10 +291,16 @@ class AgentCore:
                     content="Tool calls failed repeatedly. Please check the tool arguments or try a different "
                     "approach.",
                 )
+                yield CLIverMessageChunk(
+                    vendor_ext={"__llm_trace__": json.dumps(diagnostic_trace)},
+                )
                 return
 
         yield CLIverMessageChunk(
             content="Reached maximum iterations without a final answer.",
+        )
+        yield CLIverMessageChunk(
+            vendor_ext={"__llm_trace__": json.dumps(diagnostic_trace)},
         )
 
     # ── Tool execution (shared by both loops) ─────────────────

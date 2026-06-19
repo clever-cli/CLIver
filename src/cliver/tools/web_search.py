@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_RESULTS = 5
 
-SUPPORTED_ENGINES = ["duckduckgo", "bing", "sogou", "google", "baidu"]
+SUPPORTED_ENGINES = ["duckduckgo", "bing", "sogou", "google"]
 
 
 def _get_configured_engines() -> list[str]:
@@ -236,57 +236,6 @@ def _sogou_search(query: str, num_results: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Baidu
-# ---------------------------------------------------------------------------
-
-
-def _parse_baidu(html: str, query: str, num_results: int) -> str:
-    """Parse Baidu search results from HTML."""
-    import re
-
-    results = []
-    block_pattern = re.compile(r'<div class="[^"]*c-container[^"]*"[^>]*>(.*?)</div>\s*</div>', re.DOTALL)
-    link_pattern = re.compile(r'<a[^>]*href="(https?://[^"]+)"[^>]*>(.*?)</a>', re.DOTALL)
-
-    for block in block_pattern.findall(html)[:num_results]:
-        link_match = link_pattern.search(block)
-        if link_match:
-            url = link_match.group(1)
-            title = re.sub(r"<[^>]+>", "", link_match.group(2)).strip()
-            if title and "baidu.com" not in url:
-                idx = len(results)
-                result = f"[{idx + 1}] {title}\n    URL: {url}"
-                results.append(result)
-
-    # Fallback: extract links directly
-    if not results:
-        for url, title in link_pattern.findall(html):
-            if "baidu.com" in url or not title.strip():
-                continue
-            clean_title = re.sub(r"<[^>]+>", "", title).strip()
-            if clean_title and len(clean_title) > 5:
-                idx = len(results)
-                results.append(f"[{idx + 1}] {clean_title}\n    URL: {url}")
-                if len(results) >= num_results:
-                    break
-
-    if not results:
-        return f"No search results found for: {query}"
-    return f"Search results for: {query}\n\n" + "\n\n".join(results)
-
-
-def _baidu_search(query: str, num_results: int) -> str:
-    """Search using Baidu (Chinese search engine, no API key needed)."""
-    url = f"https://www.baidu.com/s?wd={urllib.parse.quote(query)}&rn={num_results}"
-    req = url_request(url, user_agent=BROWSER_USER_AGENT)
-
-    with urllib.request.urlopen(req, timeout=15) as response:
-        html = response.read().decode("utf-8", errors="replace")
-
-    return _parse_baidu(html, query, num_results)
-
-
-# ---------------------------------------------------------------------------
 # Engines dispatch
 # ---------------------------------------------------------------------------
 
@@ -295,7 +244,6 @@ _ENGINES = {
     "bing": _bing_search,
     "sogou": _sogou_search,
     "google": _google_search,
-    "baidu": _baidu_search,
 }
 
 
@@ -320,15 +268,25 @@ def web_search(
     Args:
         query: The search query to find information on the web.
         max_results: Maximum number of results to return. Defaults to 5.
-        engine: Search engine to use: duckduckgo (default), bing, sogou, google, baidu.
-            If a previous search told you which engine worked, use that one.
+        engine: Specific engine to try first (duckduckgo, bing, sogou, google).
+            If left empty, the configured search engines are used in order.
     """
-    num_results = max_results or DEFAULT_MAX_RESULTS
+    # Coerce to int: some providers pass numeric args as strings.
+    try:
+        num_results = int(max_results) if max_results else DEFAULT_MAX_RESULTS
+    except (TypeError, ValueError):
+        num_results = DEFAULT_MAX_RESULTS
 
+    # Build fallback chain: configured engines are always tried.
+    # If the caller suggests a specific engine it's tried first, but
+    # we still fall through to the user's configured engines.
+    configured = _get_configured_engines()
     if engine and engine.lower() in _ENGINES:
-        order = [engine.lower()]
+        # Prepend the requested engine, then append configured engines
+        # (deduplicated so it isn't tried twice)
+        order = [engine.lower()] + [e for e in configured if e != engine.lower()]
     else:
-        order = _get_configured_engines()
+        order = configured
 
     errors = []
     for eng_name in order:

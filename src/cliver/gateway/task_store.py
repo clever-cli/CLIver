@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS task_runs (
     started_at TEXT NOT NULL,
     finished_at TEXT,
     error TEXT,
-    result TEXT
+    result TEXT,
+    session_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_runs_task_name
@@ -241,8 +242,8 @@ class TaskStore:
         with self._store.write() as db:
             db.execute(
                 """INSERT INTO task_runs
-                   (task_name, execution_id, status, started_at, finished_at, error, result)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (task_name, execution_id, status, started_at, finished_at, error, result, session_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     run.task_name,
                     run.execution_id,
@@ -251,6 +252,7 @@ class TaskStore:
                     run.finished_at,
                     run.error,
                     run.result,
+                    run.session_id,
                 ),
             )
 
@@ -258,7 +260,7 @@ class TaskStore:
         with self._store.read() as db:
             rows = db.execute(
                 """SELECT task_name, execution_id, status,
-                          started_at, finished_at, error, result
+                          started_at, finished_at, error, result, session_id
                    FROM task_runs
                    WHERE task_name = ?
                    ORDER BY id DESC

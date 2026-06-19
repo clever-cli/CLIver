@@ -432,6 +432,17 @@ class Gateway:
             run_record.status = "completed"
             run_record.result = response_text
 
+            # Create a session for every execution so it's viewable in the admin
+            if self._session_manager:
+                session_id = self._session_manager.create_session(
+                    title=f"{task.name} [{execution_id}]",
+                )
+                self._session_manager.append_turn(session_id, "user", task.prompt)
+                self._session_manager.append_turn(
+                    session_id, "assistant", response_text, message=response.message or None
+                )
+                run_record.session_id = session_id
+
             # Deliver result to IM origin, or save JSON for non-IM tasks
             if task.origin and task.origin.platform and task.origin.channel_id:
                 await self._deliver_to_origin(task, response_text)
@@ -443,6 +454,21 @@ class Gateway:
             run_record.error = str(e)
             response_text = f"Task '{task.name}' failed: {e}"
             logger.error(f"Task '{task.name}' failed: {e}")
+
+            # Create a session for failed executions too
+            if self._session_manager:
+                session_id = self._session_manager.create_session(
+                    title=f"{task.name} [{execution_id}]",
+                )
+                self._session_manager.append_turn(session_id, "user", task.prompt)
+                msg = CLIverMessage(role="assistant", content=response_text)
+                self._session_manager.append_turn(
+                    session_id,
+                    "assistant",
+                    response_text,
+                    message=msg,
+                )
+                run_record.session_id = session_id
 
             if task.origin and task.origin.platform and task.origin.channel_id:
                 try:
@@ -550,7 +576,10 @@ class Gateway:
 
         configure_timezone(config_manager.config.timezone)
 
+        from cliver.agent_profile import set_current_profile
+
         self._agent_profile = CliverProfile(self.config_dir)
+        set_current_profile(self._agent_profile)
         self._agent_profile.ensure_dirs()
 
         self._builtin_tools = discover_builtin_tools()
@@ -777,7 +806,12 @@ class Gateway:
             linked_origin = session_opts.get("task_origin")
 
             # Record user turn
-            sm.append_turn(session_id, "user", event.text)
+            sm.append_turn(
+                session_id,
+                "user",
+                event.text,
+                message=CLIverMessage(role="user", content=event.text),
+            )
 
             # Run Agent
             default_model = self._get_default_model_name()
@@ -837,7 +871,7 @@ class Gateway:
                 im_context.set(None)
 
             # Record assistant turn and trim if session is getting large
-            sm.append_turn(session_id, "assistant", response_text)
+            sm.append_turn(session_id, "assistant", response_text, message=response.message or None)
             sc = self._get_config_manager().config.session
             trimmed = sm.trim_turns(session_id, keep_last=sc.max_turns_per_session)
             if trimmed:

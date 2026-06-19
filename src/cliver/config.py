@@ -79,39 +79,37 @@ class ModelConfig(BaseModel):
 
     model_config = {"extra": "allow"}
 
-    # Internal: set during config loading, not serialized
-    _provider_config: Optional["ProviderConfig"] = None
-
     @property
     def api_model_name(self) -> str:
         """The model name as sent to the provider API."""
         return self.model
 
-    def get_provider_type(self) -> str:
-        if self._provider_config is not None:
-            return self._provider_config.type
-        return "openai"
+    def get_provider_protocol(self, pc: "ProviderConfig | None" = None) -> str:
+        """Return the protocol type (``"openai"`` or ``"anthropic"``).
 
-    def get_resolved_url(self) -> Optional[str]:
-        if self._provider_config is not None:
-            return self._provider_config.api_url
-        return None
+        Pass *pc* from :meth:`ConfigManager.get_provider_config` to resolve
+        directly from the user's ProviderConfig.
+        """
+        return pc.type if pc else "openai"
 
-    def get_api_key(self) -> Optional[str]:
-        if self._provider_config is not None:
-            return self._provider_config.get_api_key()
-        return None
+    def get_resolved_url(self, pc: "ProviderConfig | None" = None) -> Optional[str]:
+        """Return the API base URL.  *pc* is the linked ProviderConfig."""
+        if self.api_url:
+            return self.api_url
+        return pc.api_url if pc else None
 
-    def get_resolved_pricing(self) -> Optional[tuple]:
+    def get_api_key(self, pc: "ProviderConfig | None" = None) -> Optional[str]:
+        """Return the API key.  *pc* is the linked ProviderConfig."""
+        return pc.get_api_key() if pc else None
+
+    def get_resolved_pricing(self, pc: "ProviderConfig | None" = None) -> Optional[tuple]:
         """Get provider-level pricing.
 
         Returns (input, output, cached_input, currency) per million tokens.
         """
-        if self._provider_config is not None and self._provider_config.pricing is not None:
-            pp = self._provider_config.pricing
-            if pp.input is not None and pp.output is not None:
-                cached = pp.cached_input or pp.input
-                return (pp.input, pp.output, cached, pp.currency or "USD")
+        if pc and pc.pricing and pc.pricing.input is not None and pc.pricing.output is not None:
+            cached = pc.pricing.cached_input or pc.pricing.input
+            return (pc.pricing.input, pc.pricing.output, cached, pc.pricing.currency or "USD")
         return None
 
     @property
@@ -120,14 +118,13 @@ class ModelConfig(BaseModel):
 
     @property
     def can_strict_tool_call(self) -> bool:
-        return self.get_provider_type() == "openai"
+        return self.get_provider_protocol() == "openai"
 
     def model_dump(self, **kwargs):
         """Override to exclude internal fields and null values."""
         data = super().model_dump(**kwargs)
         data.pop("name", None)
         data.pop("provider", None)
-        data.pop("_provider_config", None)
         return {k: v for k, v in data.items() if v is not None}
 
 
@@ -260,6 +257,8 @@ class AgentConfig(BaseModel):
         default=None, description="Tool groups to enable (e.g. ['code', 'web']). None = all"
     )
     auto_fallback: Optional[bool] = Field(default=None, description="Model auto-fallback")
+    timeout_s: Optional[int] = Field(default=None, description="Max seconds per chat call (None = 300)")
+    max_retries: int = Field(default=0, description="Max retries on failure (0 = no retries)")
 
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
@@ -459,10 +458,7 @@ class ConfigManager:
                             if isinstance(model_data, dict):
                                 model_data["name"] = model_key
                                 model_data["category"] = cat_name
-                                provider_name = model_data.get("provider", "")
                                 mc = ModelConfig(**model_data)
-                                if provider_name and provider_name in providers:
-                                    mc._provider_config = providers[provider_name]
                                 flat_models[mc.name] = mc
                                 cat_models[cat_name][mc.name] = mc
 
@@ -654,7 +650,6 @@ class ConfigManager:
             llm = ModelConfig(
                 name=model_name, provider=provider, model=api_model_name, category=category, api_url=api_url
             )
-            llm._provider_config = self.config.providers[provider]
             self.config.models.setdefault(category, {})[model_name] = llm
             if self.config.default_model is None:
                 self.config.default_model = model_name
@@ -730,10 +725,6 @@ class ConfigManager:
                 rate_limit=rate_limit,
                 pricing=PricingConfig(**pricing) if pricing else None,
             )
-        # Re-link models referencing this provider
-        for model in self.all_models().values():
-            if model.provider == name:
-                model._provider_config = self.config.providers[name]
         self._save_config()
 
     def remove_provider(self, name: str) -> bool:
@@ -748,6 +739,10 @@ class ConfigManager:
 
     def list_providers(self) -> Dict[str, ProviderConfig]:
         return self.config.providers
+
+    def get_provider_config(self, name: str) -> Optional[ProviderConfig]:
+        """Return the ProviderConfig for *name*, or None if not found."""
+        return self.config.providers.get(name)
 
     def get_llm_model(self, name: Optional[str] = None) -> Optional[ModelConfig]:
         if not name:

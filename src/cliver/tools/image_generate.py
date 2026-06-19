@@ -46,7 +46,7 @@ def _find_image_model(requested: str = "") -> tuple[str | None, str]:
         "Use when the user asks to create, draw, or generate an image."
     ),
 )
-def image_generate(
+async def image_generate(
     prompt: str,
     model: str = "",
     output_dir: str = "",
@@ -59,8 +59,6 @@ def image_generate(
             Leave empty to auto-select the first image-capable model.
         output_dir: Directory to save generated images.
     """
-    import asyncio
-
     from cliver.llm.agent_core import AgentCore
     from cliver.provider.providers import create_provider
 
@@ -81,10 +79,12 @@ def image_generate(
     if not mc:
         return [{"error": f"Image model '{model_key}' not found. Available: {available}"}]
 
+    pc = cm.get_provider_config(mc.provider)
     provider = create_provider(
-        api_key=mc.get_api_key() or "",
-        base_url=mc.get_resolved_url() or "",
-        protocol=mc.get_provider_type(),
+        api_key=pc.get_api_key() if pc else None,
+        base_url=mc.get_resolved_url(pc) or None,
+        protocol=mc.get_provider_protocol(pc),
+        provider_class=mc.provider,
         user_agent=cm.config.user_agent,
     )
 
@@ -92,13 +92,7 @@ def image_generate(
 
     try:
         save_dir = output_dir.strip() or os.path.join(os.getcwd(), ".cliver", "generated-images")
-        response = asyncio.run(
-            agent_core.generate(
-                prompt=prompt,
-                media_type="image",
-                output_dir=save_dir,
-            )
-        )
+        response = await agent_core.generate(prompt=prompt, media_type="image", output_dir=save_dir)
 
         if not response.media:
             return [{"text": response.message.text or "Image generation completed but no media was returned."}]

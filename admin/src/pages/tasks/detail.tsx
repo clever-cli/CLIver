@@ -398,7 +398,7 @@ export default function TaskDetailPage() {
                       runSessionId
                         ? () =>
                             navigate(
-                              `/admin/sessions/gateway/${encodeURIComponent(runSessionId)}?title=${encodeURIComponent(name ?? "")} [${String(r.execution_id)}]`,
+                              `/admin/sessions/${encodeURIComponent(runSessionId)}?title=${encodeURIComponent(name ?? "")} [${String(r.execution_id)}]`,
                             )
                         : undefined
                     }

@@ -110,10 +110,11 @@ class Cliver:
 
     def _init_profile(self) -> None:
         """Initialize profile and all scoped components."""
-        from cliver.agent_profile import _DEFAULT_IDENTITY
+        from cliver.agent_profile import _DEFAULT_IDENTITY, set_current_profile
         from cliver.token_tracker import TokenTracker
 
         self.agent_profile = CliverProfile(self.config_dir)
+        set_current_profile(self.agent_profile)
         self.agent_profile.ensure_dirs()
 
         if not self.agent_profile.identity_file.exists():
@@ -135,7 +136,8 @@ class Cliver:
 
         pricing = {}
         for name, model_cfg in self.config_manager.list_llm_models().items():
-            resolved = model_cfg.get_resolved_pricing()
+            pc = self.config_manager.get_provider_config(model_cfg.provider)
+            resolved = model_cfg.get_resolved_pricing(pc)
             if resolved:
                 pricing[name] = resolved
 

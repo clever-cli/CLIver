@@ -61,29 +61,33 @@ class Scheduler:
     def sync_tasks(self) -> None:
         """Sync all configured tasks to APScheduler jobs.
 
-        Adds jobs for new tasks, removes jobs for deleted tasks,
-        and updates jobs for modified tasks.
+        Adds jobs for scheduled tasks, removes jobs for manual/deleted tasks.
         """
         existing_jobs = {j.id for j in self._scheduler.get_jobs()}
-        configured_tasks = {t.name for t in self._task_manager.list_tasks()}
+        all_tasks = {t.name: t for t in self._task_manager.list_tasks()}
+        configured = set(all_tasks)
+        scheduled = {n for n, t in all_tasks.items() if t.schedule or t.run_at}
 
-        # Remove jobs for deleted tasks
-        for job_id in existing_jobs - configured_tasks:
+        # Remove jobs for deleted or now-manual tasks
+        for job_id in existing_jobs - scheduled:
             self._scheduler.remove_job(job_id)
-            logger.info("Removed job for deleted task '%s'", job_id)
+            reason = "deleted" if job_id not in configured else "now manual"
+            logger.info("Removed job for %s task '%s'", reason, job_id)
 
-        # Add or update jobs for existing tasks
-        for task in self._task_manager.list_tasks():
-            self._add_or_update_job(task)
-            if not task.prompt or not task.prompt.strip():
-                logger.warning("Task '%s' has an empty prompt", task.name)
+        # Add or update jobs for scheduled tasks
+        for name in scheduled:
+            self._add_or_update_job(all_tasks[name])
+            if not all_tasks[name].prompt or not all_tasks[name].prompt.strip():
+                logger.warning("Task '%s' has an empty prompt", name)
 
     def _add_or_update_job(self, task: TaskDefinition) -> None:
-        """Add or replace an APScheduler job for a single task."""
+        """Add or replace an APScheduler job for a scheduled task.
+
+        Only called for tasks with a schedule or run_at — manual tasks
+        never reach this method.
+        """
         trigger = self._build_trigger(task)
-        if trigger is None:
-            self._scheduler.remove_job(task.name)
-            return
+        assert trigger is not None, f"Expected trigger for scheduled task '{task.name}'"
 
         task_name = task.name
 
@@ -91,7 +95,10 @@ class Scheduler:
             t = self._task_manager.get_task(task_name)
             if not t:
                 logger.warning("Task '%s' not found — removing stale job", task_name)
-                self._scheduler.remove_job(task_name)
+                try:
+                    self._scheduler.remove_job(task_name)
+                except Exception:
+                    pass
                 return
             try:
                 await self._run_task_fn(t)

@@ -66,6 +66,7 @@ class TaskRun(BaseModel):
     finished_at: Optional[str] = None
     error: Optional[str] = None
     result: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class TaskEntry(BaseModel):

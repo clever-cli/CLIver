@@ -32,9 +32,24 @@ class _EngineProvider(Provider):
         return self.engine.msg_to_native(msg)
 
     async def chat(self, request: CLIverRequest) -> CLIverResponse:
-        messages = [self.msg_to_native(m) for m in request.messages]
+        native_messages = [self.msg_to_native(m) for m in request.messages]
         options = self.filter_options(request.options)
-        response = await self.engine.chat(messages, request.tools or [], request.model, options)
+        response = await self.engine.chat(native_messages, request.tools or [], request.model, options)
+
+        # Attach request diagnostic data for session turn inspection.
+        # Convert Pydantic models to plain dicts so vendor_ext serialises cleanly.
+        response.message.vendor_ext["__llm_request__"] = {
+            "model": request.model,
+            "provider": self.provider_name(),
+            "options": options,
+            "system_prompt": next(
+                (m.content for m in request.messages if m.role == "system"),
+                None,
+            ),
+            "messages": [m.model_dump(exclude_none=True) for m in request.messages],
+            "tools": [t.model_dump(exclude={"execute"}) for t in (request.tools or [])],
+        }
+
         return self.on_response(response)
 
     async def stream(self, request: CLIverRequest) -> AsyncIterator[CLIverMessageChunk]:
@@ -134,8 +149,8 @@ def detect_provider_class(api_url: str) -> type[Provider]:
 
 
 def create_provider(
-    api_key: str,
-    base_url: str,
+    api_key: str | None = None,
+    base_url: str | None = None,
     *,
     protocol: str = "openai",
     provider_class: type[Provider] | str | None = None,
@@ -144,8 +159,9 @@ def create_provider(
     """Create a Provider instance.
 
     Args:
-        api_key: API key for the provider.
+        api_key: API key for the provider (may be None).
         base_url: Base URL for the provider API.
+            Falls back to the provider's ``default_base_url`` when empty/None.
         protocol: ``"openai"`` (default) or ``"anthropic"``.
         provider_class: Optional override for auto-detection.
             Can be a class, a string name (e.g. ``"deepseek"``, ``"minimax"``),
@@ -155,16 +171,27 @@ def create_provider(
     Returns:
         A Provider instance ready to use.
     """
+    api_key = api_key or ""
+    url = base_url or ""
+
     if provider_class is None:
-        cls = detect_provider_class(base_url)
+        cls = detect_provider_class(url)
     elif isinstance(provider_class, str):
         factory = _NAME_PROVIDER_MAP.get(provider_class.lower())
         cls = factory() if factory else _get_openai_provider()
     else:
         cls = provider_class
 
-    # Use provider's default URL if none specified
-    if not base_url:
-        base_url = getattr(cls, "default_base_url", "")
+    # If the named provider doesn't support the requested protocol, fall
+    # back to the canonical provider for that protocol.  This can happen
+    # when a model's ``provider`` field names a brand whose default
+    # protocol differs from the one in ProviderConfig (e.g. MiniMax
+    # using ``type: anthropic`` but ``provider: minimax``).
+    if protocol not in cls.supported_protocols:
+        cls = _get_anthropic_provider() if protocol == "anthropic" else _get_openai_provider()
 
-    return cls(api_key=api_key, base_url=base_url, protocol=protocol, user_agent=user_agent)
+    # Use provider's default URL if none specified
+    if not url:
+        url = getattr(cls, "default_base_url", "")
+
+    return cls(api_key=api_key, base_url=url, protocol=protocol, user_agent=user_agent)

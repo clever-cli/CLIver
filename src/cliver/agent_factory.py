@@ -94,10 +94,13 @@ def create_agent_core(
 
     tools = _get_builtin_tools(config_manager)
 
+    pc = config_manager.get_provider_config(model_config.provider)
+    protocol = model_config.get_provider_protocol(pc)
     provider = create_provider(
-        api_key=model_config.get_api_key() or "",
-        base_url=model_config.get_resolved_url() or "",
-        protocol=model_config.get_provider_type(),
+        api_key=pc.get_api_key() if pc else None,
+        base_url=model_config.get_resolved_url(pc) or None,
+        protocol=protocol,
+        provider_class=model_config.provider,
         user_agent=user_agent,
     )
 
@@ -107,7 +110,7 @@ def create_agent_core(
         models=models,
         agents=agents,
         current_model=model_config.api_model_name,
-        current_provider=model_config.get_provider_type(),
+        current_provider=protocol,
     )
 
     return AgentCore(

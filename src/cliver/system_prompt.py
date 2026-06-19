@@ -124,11 +124,19 @@ def _section_tool_usage() -> str:
         "## How to call tools\n\n"
         "- Use the structured tool-calling mechanism provided by the model API.\n"
         "- Use the exact tool name as given — do not invent or guess.\n"
-        "- Supply arguments that match the parameter schema.\n"
-        "- You may call multiple tools in a single response when calls are independent.\n\n"
+        "- Supply arguments that match the parameter schema.\n\n"
+        "## Batching — CRITICAL for efficiency\n\n"
+        "You have a limited number of iterations (typically 50). "
+        "Every round-trip to a tool costs one iteration. "
+        "To stay within budget you MUST batch independent calls:\n\n"
+        "- **Always call ALL independent tools in a single response.** "
+        "For example, searching for two cities → call WebSearch twice in ONE response, "
+        "not one per iteration.\n"
+        "- After receiving all results, synthesise the answer directly — "
+        "do NOT fetch individual pages unless the search snippets lack the needed data.\n"
+        "- If you need to fetch pages, fetch them all in one response.\n\n"
         "## Iterative tool use\n\n"
-        "After each tool call you will receive the result. You may make additional "
-        "tool calls based on the results until you have enough information.\n\n"
+        "Only make follow-up calls when a tool result requires further action. "
         "If you already have enough information, respond directly."
     )
 
@@ -165,10 +173,37 @@ def _section_interaction_guidelines(
             pass
         parts.append("\nActivate ONE skill at a time.")
     parts.append(
-        "## Planning\n"
-        "1. Simple (1-2 steps): Respond directly.\n"
-        "2. Medium (3-5 steps): Use TodoWrite/TodoRead.\n"
-        "3. Complex: Use the planning pipeline (Skill + brainstorm/write-plan/execute-plan)."
+        "## Task Decomposition — CRITICAL for complex requests\n\n"
+        "When a user request requires more than 3 distinct steps to complete, "
+        "you MUST break it into small, independently executable units before "
+        "taking any action.  This prevents iteration exhaustion and makes "
+        "progress visible.\n\n"
+        "### When to decompose\n\n"
+        '- Research tasks ("compare X and Y", "find the best Z for W")\n'
+        '- Multi-step workflows ("set up a project with A, B, and C")\n'
+        '- Data gathering across sources ("check weather for 3 cities")\n'
+        '- Any request where you think "I\'ll need several rounds of tool calls"\n\n'
+        "### How to decompose\n\n"
+        "1. **Analyse** the request — list every distinct piece of information "
+        "or action needed.\n"
+        "2. **Group** related items that can be fetched/executed together "
+        "(batch them in one tool call).\n"
+        "3. **Order** the groups — independent groups can run in parallel; "
+        "dependent groups must run sequentially.\n"
+        "4. **Execute** one group per iteration.  Use TodoWrite to track "
+        "progress so the user sees what is happening.\n\n"
+        "### Example\n\n"
+        'User: "Compare the weather in Beijing and Shanghai for today and tomorrow"\n\n'
+        "Decomposition:\n"
+        '- Unit 1 (parallel): WebSearch("Beijing weather today tomorrow") + '
+        'WebSearch("Shanghai weather today tomorrow")\n'
+        "- Unit 2: Synthesise comparison from search results\n\n"
+        "This takes 2 iterations instead of 4+.\n\n"
+        "### Anti-patterns to avoid\n\n"
+        "- Do NOT search → read result → search next → read result → … "
+        "(one-at-a-time chaining burns iterations).\n"
+        "- Do NOT fetch individual pages unless search snippets lack the needed data.\n"
+        "- Do NOT start executing before you have a clear plan."
     )
     parts.append("## Error handling\n\nIf a tool call fails, analyse the error and try an alternative approach.")
     parts.append(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Callable
 
 from starlette.requests import Request
@@ -10,6 +11,42 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 logger = logging.getLogger(__name__)
+
+# Fields clients are allowed to set on task create/update.
+_ALLOWED_TASK_FIELDS = frozenset(
+    {
+        "name",
+        "description",
+        "prompt",
+        "skills",
+        "model",
+        "agent",
+        "schedule",
+        "run_at",
+        "workflow",
+    }
+)
+
+# Task names must be filesystem-safe: alphanumeric, hyphens, underscores only.
+_TASK_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def _validate_task_name(name: str) -> None:
+    """Reject task names containing path separators, null bytes, or other
+    dangerous characters that could enable path traversal."""
+    if not _TASK_NAME_RE.match(name):
+        raise ValueError(
+            "Task name must be 1-128 characters, start with an alphanumeric, "
+            "and contain only letters, digits, hyphens, underscores, or dots."
+        )
+
+
+def _pick_allowed(body: dict, *, extra: dict | None = None) -> dict:
+    """Return only the allowed task fields from *body*, merged with *extra*."""
+    data = {k: v for k, v in body.items() if k in _ALLOWED_TASK_FIELDS}
+    if extra:
+        data.update(extra)
+    return data
 
 
 def _get_tasks(ctx: dict) -> list:
@@ -133,12 +170,68 @@ def get_task_routes(context: dict, require_auth: Callable) -> list:
         from cliver.gateway.admin import _run_in_thread
 
         name = request.path_params["name"]
+        try:
+            _validate_task_name(name)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
         detail = await _run_in_thread(_get_task_detail, context, name)
         return JSONResponse(detail)
+
+    async def _save_task(body: dict, *, action: str) -> JSONResponse:
+        """Shared create/update logic."""
+        from cliver.gateway.task_store import TaskStore
+        from cliver.task_manager import TaskDefinition, TaskManager
+
+        gateway = context.get("gateway")
+        if not gateway:
+            return JSONResponse({"error": "Gateway not available"}, status_code=500)
+
+        task = TaskDefinition(**body)
+
+        store = TaskStore(gateway._agent_profile.db_path)
+        tm = TaskManager(gateway._agent_profile.tasks_dir, store)
+        tm.save_task(task)
+        store.close()
+
+        if gateway._scheduler:
+            gateway._scheduler.sync_tasks()
+
+        logger.info("[admin] Task '%s' %s via admin portal", task.name, action)
+        status = 201 if action == "created" else 200
+        return JSONResponse(task.model_dump(exclude_none=True), status_code=status)
+
+    @require_auth
+    async def handle_create_task(request: Request):
+        try:
+            body = _pick_allowed(await request.json())
+            _validate_task_name(body["name"])
+            return await _save_task(body, action="created")
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            logger.error("Failed to create task: %s", e)
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    @require_auth
+    async def handle_update_task(request: Request):
+        try:
+            task_name = request.path_params["name"]
+            _validate_task_name(task_name)
+            body = _pick_allowed(await request.json(), extra={"name": task_name})
+            return await _save_task(body, action="updated")
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            logger.error("Failed to update task '%s': %s", task_name, e)
+            return JSONResponse({"error": str(e)}, status_code=400)
 
     @require_auth
     async def handle_run_task(request: Request):
         task_name = request.path_params["name"]
+        try:
+            _validate_task_name(task_name)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
         logger.info("[admin] Task '%s' triggered via admin portal", task_name)
         result = await _run_task(context, task_name)
         status_code = 200 if result.get("status") == "started" else 400
@@ -147,6 +240,10 @@ def get_task_routes(context: dict, require_auth: Callable) -> list:
     @require_auth
     async def handle_delete_task(request: Request):
         task_name = request.path_params["name"]
+        try:
+            _validate_task_name(task_name)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
         logger.info("[admin] Task '%s' deleted via admin portal", task_name)
         try:
             from cliver.gateway.task_store import TaskStore
@@ -175,7 +272,9 @@ def get_task_routes(context: dict, require_auth: Callable) -> list:
 
     return [
         Route("/admin/api/tasks", handle_tasks),
+        Route("/admin/api/tasks", handle_create_task, methods=["POST"]),
         Route("/admin/api/tasks/{name}", handle_task_detail_api),
+        Route("/admin/api/tasks/{name}", handle_update_task, methods=["PUT"]),
         Route("/admin/api/tasks/{name}/run", handle_run_task, methods=["POST"]),
         Route("/admin/api/tasks/{name}", handle_delete_task, methods=["DELETE"]),
     ]

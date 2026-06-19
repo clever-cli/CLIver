@@ -12,6 +12,7 @@ export interface ChatStreamEvent {
   data?: unknown;
   artifacts?: ChatArtifact[];
   session_id?: string;
+  __llm_trace__?: Array<Record<string, unknown>>;
 }
 
 export interface ConversationMessage {
@@ -25,7 +26,7 @@ export interface ChatStreamConfig {
   abortSignal?: AbortSignal;
   onEvent: (event: ChatStreamEvent) => void;
   onError: (error: Error) => void;
-  onDone: (fullText: string, artifacts: ChatArtifact[], sessionId?: string) => void;
+  onDone: (fullText: string, artifacts: ChatArtifact[], sessionId?: string, llmTrace?: Array<Record<string, unknown>>) => void;
   // Called as soon as the backend creates the session — before any content.
   // The UI can navigate to the conversation URL immediately.
   onSessionReady?: (sessionId: string) => void;
@@ -121,7 +122,8 @@ export async function streamChat(config: ChatStreamConfig): Promise<void> {
                 artifacts = rawArtifacts;
               }
               const sessionId = raw.session_id as string | undefined;
-              onDone(fullText || (event.text || event.content as string) || "", artifacts, sessionId);
+              const trace = raw.__llm_trace__ as Array<Record<string, unknown>> | undefined;
+              onDone(fullText || (event.text || event.content as string) || "", artifacts, sessionId, trace);
               return;
             }
             if (event.type === "error") {

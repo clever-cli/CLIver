@@ -10,7 +10,8 @@ import {
   type AppendMessage,
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
-import { ArrowUp, Square, Play, FileText, Brain, Package } from "lucide-react";
+import { ArrowUp, Square, Play, FileText, Brain, Package, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { useLab, useLabGoldenTests, useRunGoldenTests, type TestRunResult } from "@/hooks/use-api";
 import { useConversation } from "@/hooks/use-conversations";
 import { streamChat } from "@/lib/chat-stream";
@@ -21,6 +22,53 @@ import { useTranslation } from "@/i18n";
 
 function generateId(): string {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function TraceJsonBlock({ label, data }: { label: string; data: unknown }) {
+  const [open, setOpen] = useState(false);
+  const jsonStr = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        {label}
+      </button>
+      {open && (
+        <pre className="mt-1 p-2 bg-muted/50 rounded text-[11px] max-h-60 overflow-auto whitespace-pre-wrap">
+          {jsonStr}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function TraceIteration({ iteration, index }: { iteration: Record<string, unknown>; index: number }) {
+  const [open, setOpen] = useState(false);
+  const model = iteration.model as string;
+  const provider = iteration.provider as string;
+  return (
+    <div className="border rounded-md text-xs">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-accent/50 transition-colors rounded-md text-left"
+      >
+        {open ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+        <Badge variant="secondary" className="text-[10px]">Iteration {index + 1}</Badge>
+        <span className="text-muted-foreground">{model}</span>
+        {provider && <span className="text-muted-foreground">({provider})</span>}
+      </button>
+      {open && (
+        <div className="px-2 pb-2 space-y-1.5">
+          {iteration.request != null && <TraceJsonBlock label="Request" data={iteration.request} />}
+          {iteration.response != null && <TraceJsonBlock label="Raw Response" data={iteration.response} />}
+          {iteration.message != null && <TraceJsonBlock label="Parsed Message" data={iteration.message} />}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function LabChatPage() {
@@ -46,6 +94,8 @@ export default function LabChatPage() {
   const { data: conversationDetail } = useConversation(activeSessionId);
 
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ThreadMessageLike[]>>({});
+  const [traceByMsgId, setTraceByMsgId] = useState<Record<string, Array<Record<string, unknown>>>>({});
+  const [inspectTrace, setInspectTrace] = useState<Array<Record<string, unknown>> | null>(null);
   const [runningConvId, setRunningConvId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -240,7 +290,7 @@ export default function LabChatPage() {
         apiPath: `/admin/api/labs/${encodeURIComponent(convLabId)}/chat/${encodeURIComponent(convId!)}`,
         model: selectedModel || undefined,
         systemMessage: systemPrompt || undefined,
-        filterTools: [...new Set([...BUILTIN_SKILLS, ...selectedSkills])],
+        filterTools: undefined,
         conversationId: convId ?? undefined,
         abortSignal: controller.signal,
         extraBody: { mcp_server_ids: selectedMCPServerIds },
@@ -277,7 +327,10 @@ export default function LabChatPage() {
           setError(err.message);
           setRunningConvId(null);
         },
-        onDone: (_fullText, _artifacts, _sessionId) => {
+        onDone: (_fullText, _artifacts, _sessionId, llmTrace) => {
+          if (llmTrace) {
+            setTraceByMsgId((prev) => ({ ...prev, [assistantId]: llmTrace }));
+          }
           setRunningConvId(null);
           queryClient.invalidateQueries({ queryKey: ["conversations"] });
           queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
@@ -309,6 +362,17 @@ export default function LabChatPage() {
 
   const lab = labDetail.lab;
   const showEmptyState = !activeSessionId && messages.length === 0;
+
+  const traceMsgIds = new Set(Object.keys(traceByMsgId));
+  // Also include trace from conversationDetail turns loaded from DB
+  const dbTurns = (conversationDetail?.turns || []) as unknown as Array<Record<string, unknown>>;
+  const dbTraceByIndex: Record<number, Array<Record<string, unknown>>> = {};
+  dbTurns.forEach((turn, i) => {
+    const msg = turn.message as Record<string, unknown> | undefined;
+    const vendorExt = (msg?.vendor_ext || {}) as Record<string, unknown>;
+    const trace = vendorExt.__llm_trace__ as Array<Record<string, unknown>> | undefined;
+    if (trace) dbTraceByIndex[i] = trace;
+  });
 
   return (
     <div className="flex flex-col h-full -m-6">
@@ -368,18 +432,27 @@ export default function LabChatPage() {
                   )}
                   <div className="space-y-4">
                     <ThreadPrimitive.Messages>
-                      {({ message }) => (
+                      {({ message }: { message: { id?: string; role: string } }) => {
+                        const liveTrace = traceByMsgId[message.id as string];
+                        // Match DB trace by message index in the visible list
+                        const msgIndex = messages.findIndex((m: { id?: string }) => m.id === message.id);
+                        const dbTrace = msgIndex >= 0 ? dbTraceByIndex[msgIndex] : undefined;
+                        const trace = liveTrace || dbTrace;
+                        const hasTrace = trace && trace.length > 0;
+                        return (
                         <div
                           className={`message-enter flex ${
                             message.role === "user" ? "justify-end" : "justify-start"
                           }`}
                         >
                           <div
-                            className={`message-bubble ${
+                            className={`message-bubble group relative ${
                               message.role === "user"
                                 ? "message-bubble-user"
                                 : "message-bubble-assistant"
-                            }`}
+                            } ${hasTrace ? "cursor-pointer" : ""}`}
+                            onClick={hasTrace ? () => setInspectTrace(trace) : undefined}
+                            title={hasTrace ? "Click to inspect provider communication" : undefined}
                           >
                             <MessagePrimitive.Content
                               components={{
@@ -402,12 +475,37 @@ export default function LabChatPage() {
                                 },
                               }}
                             />
+                          {hasTrace && (
+                            <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Badge variant="outline" className="text-[9px] px-1 py-0">trace</Badge>
+                            </div>
+                          )}
                           </div>
                         </div>
-                      )}
+                        );
+                      }}
                     </ThreadPrimitive.Messages>
                     <div ref={scrollAnchorRef} />
                   </div>
+
+                  {/* Trace inspection dialog */}
+                  {inspectTrace && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setInspectTrace(null)}>
+                      <div className="bg-card rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-y-auto m-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between px-4 py-3 border-b sticky top-0 bg-card z-10">
+                          <h3 className="text-sm font-semibold">Provider Communication ({inspectTrace.length} iteration{inspectTrace.length > 1 ? "s" : ""})</h3>
+                          <button onClick={() => setInspectTrace(null)} className="p-1 hover:bg-muted rounded">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="p-4 space-y-2">
+                          {inspectTrace.map((iteration, i) => (
+                            <TraceIteration key={i} iteration={iteration} index={i} />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </ThreadPrimitive.Viewport>
 

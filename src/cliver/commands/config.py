@@ -102,7 +102,8 @@ def _show_config(cliver: Cliver):
                 t.add_column("Value")
 
                 t.add_row("Provider", f"{model.provider}")
-                url = model.get_resolved_url()
+                pc = cfg.providers.get(model.provider) if cfg.providers else None
+                url = model.get_resolved_url(pc)
                 if url:
                     t.add_row("URL", f"{url}")
 

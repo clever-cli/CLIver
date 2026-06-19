@@ -195,7 +195,7 @@ class SessionManager:
             turn = {"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]}
             if r["message_json"]:
                 try:
-                    turn["message"] = CLIverMessage.model_validate_json(r["message_json"])
+                    turn["message"] = CLIverMessage.model_validate_json(r["message_json"]).model_dump(exclude_none=True)
                 except Exception:
                     pass
             result.append(turn)

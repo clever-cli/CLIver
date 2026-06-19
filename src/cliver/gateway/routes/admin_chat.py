@@ -94,7 +94,14 @@ def get_chat_routes(context: dict, require_auth: Callable) -> list:
 
         if session_manager and session_id:
             try:
-                session_manager.append_turn(session_id, "user", prompt)
+                from cliver.messages import CLIverMessage
+
+                session_manager.append_turn(
+                    session_id,
+                    "user",
+                    prompt,
+                    message=CLIverMessage(role="user", content=prompt),
+                )
             except Exception as e:
                 logger.warning("Failed to persist user turn: %s", e)
 
@@ -143,6 +150,7 @@ def get_chat_routes(context: dict, require_auth: Callable) -> list:
             logger.info("Chat start — session=%s model=%s", session_id or "new", model)
 
             full_text = ""
+            vendor_ext: dict = {}
             media_files = []
             try:
                 agent = gateway._get_agent(model)
@@ -155,13 +163,28 @@ def get_chat_routes(context: dict, require_auth: Callable) -> list:
                         full_text += chunk.content
                         data = json.dumps({"type": "content", "content": chunk.content})
                         yield f"data: {data}\n\n".encode()
+                    if chunk.vendor_ext:
+                        for k, v in chunk.vendor_ext.items():
+                            if k == "__llm_trace__":
+                                # Structured diagnostic data — parse, don't accumulate
+                                vendor_ext[k] = json.loads(v) if isinstance(v, str) else v
+                            else:
+                                vendor_ext.setdefault(k, "")
+                                vendor_ext[k] += v
 
                 clean_text = _strip_tool_calls(full_text)
 
                 # Persist assistant turn
                 if session_manager and session_id:
                     try:
-                        session_manager.append_turn(session_id, "assistant", clean_text)
+                        from cliver.messages import CLIverMessage
+
+                        session_manager.append_turn(
+                            session_id,
+                            "assistant",
+                            clean_text,
+                            message=CLIverMessage(role="assistant", content=clean_text, vendor_ext=vendor_ext),
+                        )
                     except Exception as e:
                         logger.warning("Failed to persist assistant turn: %s", e)
 
@@ -172,6 +195,8 @@ def get_chat_routes(context: dict, require_auth: Callable) -> list:
                     "media_files": media_files,
                     "session_id": session_id,
                 }
+                if vendor_ext.get("__llm_trace__"):
+                    done_data["__llm_trace__"] = vendor_ext["__llm_trace__"]
                 if uses_thinking:
                     done_data["reasoning_content"] = ""
                 yield f"data: {json.dumps(done_data)}\n\n".encode()
