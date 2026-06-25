@@ -4,16 +4,9 @@ export interface ChatArtifact {
   size?: number;
 }
 
-export interface ChatStreamEvent {
-  type: "thinking" | "text" | "tool" | "tool_use" | "tool_result" | "status" | "session" | "done" | "error";
-  content?: string;
-  text?: string;
-  message?: string;
-  data?: unknown;
-  artifacts?: ChatArtifact[];
-  session_id?: string;
-  __llm_trace__?: Array<Record<string, unknown>>;
-}
+// Import runtime-validated types from Zod schemas
+import { parseChatStreamEvent, type ChatStreamEvent } from "@/lib/schemas";
+export type { ChatStreamEvent };
 
 export interface ConversationMessage {
   role: "user" | "assistant";
@@ -85,11 +78,9 @@ export async function streamChat(config: ChatStreamConfig): Promise<void> {
     let fullText = "";
     let artifacts: ChatArtifact[] = [];
 
-    const normalizeEvent = (raw: Record<string, unknown>): ChatStreamEvent => {
-      if (raw.type === "chunk" || raw.type === "content") {
-        return { type: "text", content: raw.content as string };
-      }
-      return raw as unknown as ChatStreamEvent;
+    const normalizeEvent = (raw: unknown): ChatStreamEvent => {
+      // Zod validates the shape at runtime — malformed SSE events throw immediately
+      return parseChatStreamEvent(raw as Record<string, unknown>);
     };
 
     while (true) {
@@ -117,12 +108,13 @@ export async function streamChat(config: ChatStreamConfig): Promise<void> {
               fullText += event.content;
             }
             if (event.type === "done") {
-              const rawArtifacts = (raw.media || raw.media_files) as ChatArtifact[] | undefined;
-              if (rawArtifacts) {
-                artifacts = rawArtifacts;
+              const rawArtifacts = raw.media || raw.media_files;
+              if (rawArtifacts && Array.isArray(rawArtifacts)) {
+                artifacts = rawArtifacts as ChatArtifact[];
               }
-              const sessionId = raw.session_id as string | undefined;
-              const trace = raw.__llm_trace__ as Array<Record<string, unknown>> | undefined;
+              const sessionId: string | undefined = typeof raw.session_id === "string" ? raw.session_id : undefined;
+              const trace: Array<Record<string, unknown>> | undefined =
+                Array.isArray(raw.__llm_trace__) ? raw.__llm_trace__ : undefined;
               onDone(fullText || (event.text || event.content as string) || "", artifacts, sessionId, trace);
               return;
             }

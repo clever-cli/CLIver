@@ -7,6 +7,7 @@ import {
   type ModelInfo, type ModelProvider,
 } from "@/hooks/use-api";
 import { useTranslation } from "@/i18n";
+import { ModelFormSchema, type ModelFormData } from "@/lib/schemas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -300,14 +301,27 @@ export default function ModelsPage() {
   };
 
   const handleCreate = async () => {
-    if (!form.name?.trim() || !form.provider) return;
-    createModel.mutate({
-      name: form.name.trim(),
+    const result = ModelFormSchema.safeParse({
+      name: form.name?.trim(),
       provider: form.provider,
-      model: form.model || form.name.trim(),
       category: form.category || "Text",
+      model: form.model || form.name?.trim() || "",
       api_url: form.api_url || null,
       options: cleanOptions(form.options),
+    });
+    if (!result.success) {
+      // Surface validation errors — in production, show these in the form UI
+      console.error("Form validation failed:", result.error.flatten().fieldErrors);
+      return;
+    }
+    const data: ModelFormData = result.data;
+    createModel.mutate({
+      name: data.name,
+      provider: data.provider,
+      model: data.model,
+      category: data.category,
+      api_url: data.api_url ?? null,
+      options: data.options ? cleanOptions(data.options as Record<string, unknown>) : {},
     }, {
       onSuccess: () => {
         setShowCreate(false);

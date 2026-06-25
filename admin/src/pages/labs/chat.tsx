@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { useLab, useLabGoldenTests, useRunGoldenTests, type TestRunResult } from "@/hooks/use-api";
 import { useConversation } from "@/hooks/use-conversations";
 import { streamChat } from "@/lib/chat-stream";
+import { SessionOptionsSchema, type SessionOptions } from "@/lib/schemas";
 import { LabHeader } from "@/components/lab/LabHeader";
 import { LabConfigPanel } from "@/components/lab/LabConfigPanel";
 import { GoldenTestCard } from "@/components/lab/GoldenTestCard";
@@ -107,6 +108,9 @@ export default function LabChatPage() {
 
   const [inputText, setInputText] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
+  const [selectedImageModel, setSelectedImageModel] = useState("");
+  const [selectedAudioModel, setSelectedAudioModel] = useState("");
+  const [selectedVideoModel, setSelectedVideoModel] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedMCPServerIds, setSelectedMCPServerIds] = useState<string[]>([]);
@@ -140,6 +144,9 @@ export default function LabChatPage() {
   useEffect(() => {
     if (!activeSessionId) {
       setSelectedModel("");
+      setSelectedImageModel("");
+      setSelectedAudioModel("");
+      setSelectedVideoModel("");
       setSystemPrompt("");
       setSelectedSkills([]);
       setSelectedMCPServerIds([]);
@@ -151,11 +158,16 @@ export default function LabChatPage() {
     if (lastLoadedSessionId.current === dataId) return;
     lastLoadedSessionId.current = dataId;
 
-    const opts = (conversationDetail?.session?.options as Record<string, unknown>) || {};
-    if (opts.model) setSelectedModel(String(opts.model));
-    if (opts.system_prompt) setSystemPrompt(String(opts.system_prompt));
-    if (opts.skills) setSelectedSkills(Array.isArray(opts.skills) ? (opts.skills as string[]) : []);
-    if (opts.mcp_servers) setSelectedMCPServerIds(Array.isArray(opts.mcp_servers) ? (opts.mcp_servers as string[]) : []);
+    const opts: SessionOptions = SessionOptionsSchema.parse(
+      (conversationDetail?.session?.options as Record<string, unknown>) || {},
+    );
+    if (opts.model) setSelectedModel(opts.model);
+    if (opts.image_model) setSelectedImageModel(opts.image_model);
+    if (opts.audio_model) setSelectedAudioModel(opts.audio_model);
+    if (opts.video_model) setSelectedVideoModel(opts.video_model);
+    if (opts.system_prompt) setSystemPrompt(opts.system_prompt);
+    if (opts.skills) setSelectedSkills(opts.skills);
+    if (opts.mcp_servers) setSelectedMCPServerIds(opts.mcp_servers);
   }, [activeSessionId, conversationDetail]);
 
   // Clear load tracker when leaving
@@ -204,6 +216,9 @@ export default function LabChatPage() {
           body: JSON.stringify({
             options: {
               model: selectedModel || null,
+              image_model: selectedImageModel || null,
+              audio_model: selectedAudioModel || null,
+              video_model: selectedVideoModel || null,
               system_prompt: systemPrompt || null,
               skills,
               mcp_servers: selectedMCPServerIds,
@@ -214,7 +229,7 @@ export default function LabChatPage() {
       queryClient.invalidateQueries({ queryKey: ["conversation", activeSessionId] });
     } catch {}
     setSavingConfig(false);
-  }, [activeSessionId, labId, selectedModel, systemPrompt, selectedSkills, selectedMCPServerIds, queryClient]);
+  }, [activeSessionId, labId, selectedModel, selectedImageModel, selectedAudioModel, selectedVideoModel, systemPrompt, selectedSkills, selectedMCPServerIds, queryClient]);
 
   const handleSend = useCallback(() => {
     const text = inputText.trim();
@@ -293,7 +308,12 @@ export default function LabChatPage() {
         filterTools: undefined,
         conversationId: convId ?? undefined,
         abortSignal: controller.signal,
-        extraBody: { mcp_server_ids: selectedMCPServerIds },
+        extraBody: {
+          mcp_server_ids: selectedMCPServerIds,
+          image_model: selectedImageModel || undefined,
+          audio_model: selectedAudioModel || undefined,
+          video_model: selectedVideoModel || undefined,
+        },
         onSessionReady: (_sessionId) => {
           queryClient.invalidateQueries({ queryKey: ["conversations"] });
         },
@@ -337,7 +357,7 @@ export default function LabChatPage() {
         },
       });
     },
-    [activeSessionId, labId, navigate, queryClient, selectedModel, systemPrompt, selectedSkills, selectedMCPServerIds],
+    [activeSessionId, labId, navigate, queryClient, selectedModel, selectedImageModel, selectedAudioModel, selectedVideoModel, systemPrompt, selectedSkills, selectedMCPServerIds],
   );
 
   const onNewRef = useRef(onNew);
@@ -397,10 +417,16 @@ export default function LabChatPage() {
         <div className="w-[240px] min-w-[240px] border-r bg-card overflow-hidden">
           <LabConfigPanel
             selectedModel={selectedModel}
+            selectedImageModel={selectedImageModel}
+            selectedAudioModel={selectedAudioModel}
+            selectedVideoModel={selectedVideoModel}
             systemPrompt={systemPrompt}
             selectedSkills={selectedSkills}
             selectedMCPServerIds={selectedMCPServerIds}
             onModelChange={setSelectedModel}
+            onImageModelChange={setSelectedImageModel}
+            onAudioModelChange={setSelectedAudioModel}
+            onVideoModelChange={setSelectedVideoModel}
             onSystemPromptChange={setSystemPrompt}
             onSkillsChange={setSelectedSkills}
             onMCPServersChange={setSelectedMCPServerIds}

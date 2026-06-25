@@ -32,10 +32,31 @@ def _get_builtin_tools(config_manager: "ConfigManager") -> list["CLIverTool"]:
     from cliver.tool import ToolRegistry, discover_builtin_tools
 
     all_tools = discover_builtin_tools()
+    _inject_media_model_names(all_tools, config_manager)
     reg = ToolRegistry(all_tools)
     reg.configure(config_manager.config.enabled_toolsets)
     _builtin_tools_cache = reg.all_tools
     return _builtin_tools_cache
+
+
+def _inject_media_model_names(tools: list, config_manager: "ConfigManager") -> None:
+    """Inject available model names into media-generation tool descriptions.
+
+    The LLM sees these names directly in the tool schema, so it can pass
+    the correct model on the first call without listing models separately.
+    """
+    model_names: dict[str, list[str]] = {}
+    for name, mc in config_manager.all_models().items():
+        cat = getattr(mc, "category", "text") or "text"
+        model_names.setdefault(cat, []).append(name)
+
+    media_tools = {"ImageGenerate": "image", "AudioGenerate": "audio", "VideoGenerate": "video"}
+
+    for tool in tools:
+        cat = media_tools.get(tool.name)
+        if cat and cat in model_names:
+            names = ", ".join(f"`{n}`" for n in model_names[cat])
+            tool.description += f" Available models: {names}."
 
 
 def _get_mcp_client(config_manager: "ConfigManager") -> "MCPClient":
@@ -100,7 +121,7 @@ def create_agent_core(
         api_key=pc.get_api_key() if pc else None,
         base_url=model_config.get_resolved_url(pc) or None,
         protocol=protocol,
-        provider_class=model_config.provider,
+        provider_name=model_config.provider,
         user_agent=user_agent,
     )
 

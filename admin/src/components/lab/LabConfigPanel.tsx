@@ -4,10 +4,16 @@ import { useTranslation } from "@/i18n";
 
 interface LabConfigPanelProps {
   selectedModel: string;
+  selectedImageModel: string;
+  selectedAudioModel: string;
+  selectedVideoModel: string;
   systemPrompt: string;
   selectedSkills: string[];
   selectedMCPServerIds: string[];
   onModelChange: (v: string) => void;
+  onImageModelChange: (v: string) => void;
+  onAudioModelChange: (v: string) => void;
+  onVideoModelChange: (v: string) => void;
   onSystemPromptChange: (v: string) => void;
   onSkillsChange: (v: string[]) => void;
   onMCPServersChange: (v: string[]) => void;
@@ -17,10 +23,16 @@ interface LabConfigPanelProps {
 
 export function LabConfigPanel({
   selectedModel,
+  selectedImageModel,
+  selectedAudioModel,
+  selectedVideoModel,
   systemPrompt,
   selectedSkills,
   selectedMCPServerIds,
   onModelChange,
+  onImageModelChange,
+  onAudioModelChange,
+  onVideoModelChange,
   onSystemPromptChange,
   onSkillsChange,
   onMCPServersChange,
@@ -29,6 +41,9 @@ export function LabConfigPanel({
 }: LabConfigPanelProps) {
   const { t } = useTranslation();
   const { data: modelsData } = useModels();
+  const { data: imageModelsData } = useModels("Image");
+  const { data: audioModelsData } = useModels("Audio");
+  const { data: videoModelsData } = useModels("Video");
   const { data: skills } = useSkills();
   const { data: mcpServers } = useMCPServers();
 
@@ -52,8 +67,11 @@ export function LabConfigPanel({
   const BUILTIN_SKILLS = ["brainstorm", "write-plan", "execute-plan"];
 
   const modelList: string[] = Array.isArray(modelsData) ? modelsData.map((m) => m.name) : [];
+  const imageModelList: string[] = Array.isArray(imageModelsData) ? imageModelsData.map((m) => m.name) : [];
+  const audioModelList: string[] = Array.isArray(audioModelsData) ? audioModelsData.map((m) => m.name) : [];
+  const videoModelList: string[] = Array.isArray(videoModelsData) ? videoModelsData.map((m) => m.name) : [];
   const allSkills: string[] = skills
-    ? (skills as Array<Record<string, unknown>>).map((s) => s.name as string).filter(Boolean)
+    ? skills.map((s) => String((s as Record<string, unknown>).name ?? "")).filter(Boolean)
     : [];
   const builtinList = allSkills.filter((s) => BUILTIN_SKILLS.includes(s));
   const optionalList = allSkills.filter((s) => !BUILTIN_SKILLS.includes(s));
@@ -61,10 +79,10 @@ export function LabConfigPanel({
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1 overflow-y-auto space-y-4 p-3">
-        {/* Model */}
+        {/* Text Model */}
         <div>
           <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            {t("lab.model")}
+            {t("lab.textModel")}
           </label>
           <select
             value={selectedModel}
@@ -73,6 +91,51 @@ export function LabConfigPanel({
           >
             <option value="">{t("lab.modelPlaceholder")}</option>
             {modelList.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+
+        {/* Image Model */}
+        <div>
+          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            {t("lab.imageModel")}
+          </label>
+          <select
+            value={selectedImageModel}
+            onChange={(e) => onImageModelChange(e.target.value)}
+            className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">{t("lab.modelPlaceholder")}</option>
+            {imageModelList.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+
+        {/* Audio Model */}
+        <div>
+          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            {t("lab.audioModel")}
+          </label>
+          <select
+            value={selectedAudioModel}
+            onChange={(e) => onAudioModelChange(e.target.value)}
+            className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">{t("lab.modelPlaceholder")}</option>
+            {audioModelList.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+
+        {/* Video Model */}
+        <div>
+          <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            {t("lab.videoModel")}
+          </label>
+          <select
+            value={selectedVideoModel}
+            onChange={(e) => onVideoModelChange(e.target.value)}
+            className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">{t("lab.modelPlaceholder")}</option>
+            {videoModelList.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
 

@@ -37,10 +37,20 @@ class AnthropicEngine(ProtocolEngine):
         base_url: str,
         on_event: EventHandler | None = None,
         user_agent: str | None = None,
+        use_bearer_auth: bool = False,
     ):
         super().__init__(api_key, base_url, on_event, user_agent=user_agent)
         extra_headers = {"User-Agent": user_agent} if user_agent else {}
-        self.client = AsyncAnthropic(api_key=api_key, base_url=base_url, default_headers=extra_headers)
+        # Anthropic SDK: api_key → x-api-key header, auth_token → Authorization: Bearer
+        # Third-party providers (DeepSeek, MiniMax) use Bearer auth.
+        if use_bearer_auth:
+            self.client = AsyncAnthropic(auth_token=api_key, base_url=base_url, default_headers=extra_headers)
+        else:
+            self.client = AsyncAnthropic(api_key=api_key, base_url=base_url, default_headers=extra_headers)
+
+    async def close(self) -> None:
+        """Close the AsyncAnthropic client and release httpx connections."""
+        await self.client.close()
 
     # ── Conversion ──────────────────────────────────────────
 

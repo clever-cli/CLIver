@@ -26,7 +26,14 @@ class _EngineProvider(Provider):
 
     def __init__(self, protocol: str, api_key: str, base_url: str, user_agent: str | None = None):
         super().__init__(protocol, api_key, base_url)
-        self.engine: ProtocolEngine = create_engine(protocol, api_key, base_url, user_agent=user_agent)
+        use_bearer = getattr(self.__class__, "_anthropic_use_bearer_auth", False)
+        self.engine: ProtocolEngine = create_engine(
+            protocol,
+            api_key,
+            base_url,
+            user_agent=user_agent,
+            use_bearer_auth=use_bearer,
+        )
 
     def msg_to_native(self, msg: CLIverMessage) -> Any:
         return self.engine.msg_to_native(msg)
@@ -110,7 +117,8 @@ def _get_ollama_provider():
 
 # ── Auto-detection ───────────────────────────────────────────
 
-
+# URL substring → provider factory. Used to detect the provider class from a
+# configured ``api_url``.  Order matters: first match wins.
 _URL_PROVIDER_MAP: list[tuple[str, callable]] = [
     ("deepseek", _get_deepseek_provider),
     ("minimax", _get_minimax_provider),
@@ -126,21 +134,41 @@ _URL_PROVIDER_MAP: list[tuple[str, callable]] = [
     ("localhost:11434", _get_ollama_provider),
 ]
 
-_NAME_PROVIDER_MAP: dict[str, callable] = {
-    "deepseek": _get_deepseek_provider,
-    "minimax": _get_minimax_provider,
-    "openai": _get_openai_provider,
-    "anthropic": _get_anthropic_provider,
-    "glm": _get_glm_provider,
-    "ollama": _get_ollama_provider,
-}
+# Provider name substring → provider factory.  Used when no ``api_url`` is
+# configured — the only signal available is the user-defined provider config
+# name (e.g. ``providers.deepseek`` in config.yaml).
+#
+# Matching is *substring* (case-insensitive), so user-chosen names like
+# ``my-deepseek``, ``deepseek-prod``, or ``deepseek/china`` all resolve to
+# DeepSeekProvider.  Order matters: first match wins, so more specific
+# patterns (e.g. ``zhipu`` before ``glm``) are listed first.
+_NAME_PROVIDER_MAP: list[tuple[str, callable]] = [
+    ("deepseek", _get_deepseek_provider),
+    ("minimax", _get_minimax_provider),
+    ("zhipu", _get_glm_provider),
+    ("bigmodel", _get_glm_provider),
+    ("glm", _get_glm_provider),
+    ("ollama", _get_ollama_provider),
+    ("openai", _get_openai_provider),
+    ("anthropic", _get_anthropic_provider),
+]
 
 
-def detect_provider_class(api_url: str) -> type[Provider]:
-    """Detect provider entity from the base URL.
+def detect_provider_class(api_url: str, provider_name: str | None = None) -> type[Provider]:
+    """Detect provider entity from the base URL or provider config name.
 
-    Falls back to OpenAIProvider for unknown URLs (most are OpenAI-compatible).
+    Resolution order:
+    1. *provider_name* — substring match (case-insensitive) against
+       ``_NAME_PROVIDER_MAP`` patterns
+    2. *api_url* — substring match against ``_URL_PROVIDER_MAP``
+    3. Fall back to OpenAIProvider (most APIs are OpenAI-compatible).
     """
+    if provider_name:
+        name_lower = provider_name.lower()
+        for pattern, factory in _NAME_PROVIDER_MAP:
+            if pattern in name_lower:
+                return factory()
+
     url_lower = api_url.lower()
     for pattern, factory in _URL_PROVIDER_MAP:
         if pattern in url_lower:
@@ -148,25 +176,60 @@ def detect_provider_class(api_url: str) -> type[Provider]:
     return _get_openai_provider()
 
 
+def resolve_base_url(
+    model_api_url: str | None = None,
+    provider_api_url: str | None = None,
+    *,
+    protocol: str = "openai",
+    provider_cls: type[Provider] | None = None,
+) -> str:
+    """Resolve the full base URL for a provider, including class defaults.
+
+    Resolution order:
+    1. *model_api_url* — per-model override
+    2. *provider_api_url* — per-provider config
+    3. ``_default_base_urls[protocol]`` on *provider_cls*
+    4. ``default_base_url`` on *provider_cls*
+
+    Callers should use this BEFORE ``create_provider()`` so the URL is
+    always fully resolved when the provider is created.
+    """
+    url = model_api_url or provider_api_url or ""
+    if url:
+        return url
+
+    if provider_cls is None:
+        return ""
+
+    urls = getattr(provider_cls, "_default_base_urls", None)
+    return (urls or {}).get(protocol) or getattr(provider_cls, "default_base_url", "")
+
+
 def create_provider(
     api_key: str | None = None,
     base_url: str | None = None,
     *,
     protocol: str = "openai",
-    provider_class: type[Provider] | str | None = None,
+    provider_class: type[Provider] | None = None,
+    provider_name: str | None = None,
     user_agent: str | None = None,
 ) -> Provider:
     """Create a Provider instance.
 
+    The *base_url* is resolved inside this factory:
+    1. Use *base_url* if given
+    2. Fall back to the provider class's ``_default_base_urls[protocol]``
+    3. Fall back to ``default_base_url`` on the class
+
     Args:
-        api_key: API key for the provider (may be None).
-        base_url: Base URL for the provider API.
-            Falls back to the provider's ``default_base_url`` when empty/None.
+        api_key: API key for the provider.
+        base_url: Base URL (optional — defaults are used if empty).
         protocol: ``"openai"`` (default) or ``"anthropic"``.
-        provider_class: Optional override for auto-detection.
-            Can be a class, a string name (e.g. ``"deepseek"``, ``"minimax"``),
-            or ``None`` for auto-detection from ``base_url``.
-        user_agent: Optional User-Agent header sent with all HTTP requests.
+        provider_class: Provider class. If ``None``, auto-detected from
+            *base_url* and/or *provider_name*.
+        provider_name: Provider config name (e.g. ``"deepseek"``, ``"minimax"``).
+            Used to look up the correct provider class when *base_url* is empty.
+        user_agent: Optional User-Agent header.
 
     Returns:
         A Provider instance ready to use.
@@ -175,23 +238,15 @@ def create_provider(
     url = base_url or ""
 
     if provider_class is None:
-        cls = detect_provider_class(url)
-    elif isinstance(provider_class, str):
-        factory = _NAME_PROVIDER_MAP.get(provider_class.lower())
-        cls = factory() if factory else _get_openai_provider()
+        cls = detect_provider_class(url, provider_name=provider_name)
     else:
         cls = provider_class
 
-    # If the named provider doesn't support the requested protocol, fall
-    # back to the canonical provider for that protocol.  This can happen
-    # when a model's ``provider`` field names a brand whose default
-    # protocol differs from the one in ProviderConfig (e.g. MiniMax
-    # using ``type: anthropic`` but ``provider: minimax``).
     if protocol not in cls.supported_protocols:
         cls = _get_anthropic_provider() if protocol == "anthropic" else _get_openai_provider()
 
-    # Use provider's default URL if none specified
+    # Resolve URL from class defaults if not explicitly provided
     if not url:
-        url = getattr(cls, "default_base_url", "")
+        url = resolve_base_url(protocol=protocol, provider_cls=cls)
 
     return cls(api_key=api_key, base_url=url, protocol=protocol, user_agent=user_agent)

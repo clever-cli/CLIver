@@ -39,6 +39,10 @@ class OpenAIEngine(ProtocolEngine):
         extra_headers = {"User-Agent": user_agent} if user_agent else {}
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url, default_headers=extra_headers)
 
+    async def close(self) -> None:
+        """Close the AsyncOpenAI client and release httpx connections."""
+        await self.client.close()
+
     # ── Conversion ──────────────────────────────────────────
 
     def msg_to_native(self, msg: CLIverMessage) -> dict:

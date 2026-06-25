@@ -105,7 +105,17 @@ class MiniMaxProvider(_EngineProvider):
     """
 
     supported_protocols = ["openai", "anthropic"]
-    default_base_url = "https://api.minimax.chat/v1"
+
+    # MiniMax's Anthropic-compatible endpoint uses Bearer auth (same as OpenAI),
+    # not Anthropic's native x-api-key header.
+    _anthropic_use_bearer_auth = True
+
+    # Protocol-specific default URLs. Falls back to ``default_base_url``
+    # for protocols not listed here.
+    _default_base_urls: dict[str, str] = {
+        "openai": "https://api.minimaxi.com/v1",
+        "anthropic": "https://api.minimaxi.com/anthropic",
+    }
 
     UNSUPPORTED_PARAMS = {
         "frequency_penalty",
@@ -135,3 +145,42 @@ class MiniMaxProvider(_EngineProvider):
         if "thinking" in chunk.vendor_ext:
             chunk.vendor_ext["reasoning_content"] = chunk.vendor_ext.pop("thinking")
         return chunk
+
+    # MiniMax image generation; we override _resolve_media_gen_url so image
+    # requests always go to the correct domain regardless of model-level api_url.
+    _MEDIA_GEN_BASE = "https://api.minimaxi.com/v1"
+    _media_gen_urls: dict[str, str] = {
+        "image": "/image_generation",
+    }
+
+    def _resolve_media_gen_url(self, media_type: str) -> str | None:
+        path = self._media_gen_urls.get(media_type)
+        if path is None:
+            return None
+        return self._MEDIA_GEN_BASE + path
+
+    def _check_media_response_error(self, data: dict, media_type: str) -> str | None:
+        """MiniMax wraps errors in ``base_resp`` even on HTTP 200."""
+        base = data.get("base_resp", {})
+        if isinstance(base, dict) and base.get("status_code", 0) != 0:
+            return base.get("status_msg", f"error code {base.get('status_code')}")
+        return None
+
+    def _extract_media_items(self, data: dict, media_type: str) -> list[dict]:
+        """MiniMax returns images in ``image_urls`` (list of strings)."""
+        # Try nested: data.data.image_urls
+        inner = data.get("data", data)
+        image_urls = inner.get("image_urls") or data.get("image_urls") or []
+        return [{"url": u} for u in image_urls if isinstance(u, str)]
+
+    async def generate(
+        self, prompt: str, *, model: str, media_type: str = "image", media=None, output_dir=None, **options
+    ) -> CLIverResponse:
+        """Generate media via MiniMax's dedicated API endpoints.
+
+        We bypass the engine and use :meth:`_http_generate` to POST
+        directly to the media endpoint.
+        """
+        if media_type != "image":
+            raise ValueError(f"MiniMax only supports image generation, not {media_type}.")
+        return await self._http_generate(prompt, model=model, media_type=media_type, output_dir=output_dir, **options)

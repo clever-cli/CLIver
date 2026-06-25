@@ -39,16 +39,15 @@ def _find_image_model(requested: str = "") -> tuple[str | None, str]:
     name="ImageGenerate",
     description=(
         "Generate an image from a text description and save it to disk. "
-        'The `model` parameter is optional — leave it blank ("") to auto-select '
-        "the first available image model from the Configured Models list. "
-        "Only pass a model name if you verified it exists in Configured Models. "
+        "The `model` parameter is REQUIRED — use one of the model names "
+        "listed under the Image section in Configured Models. "
         "Use `output_dir` to save to a user-specified directory. "
         "Use when the user asks to create, draw, or generate an image."
     ),
 )
 async def image_generate(
     prompt: str,
-    model: str = "",
+    model: str,
     output_dir: str = "",
 ) -> list[dict]:
     """Generate an image from a text description.
@@ -84,7 +83,7 @@ async def image_generate(
         api_key=pc.get_api_key() if pc else None,
         base_url=mc.get_resolved_url(pc) or None,
         protocol=mc.get_provider_protocol(pc),
-        provider_class=mc.provider,
+        provider_name=mc.provider,
         user_agent=cm.config.user_agent,
     )
 
@@ -92,14 +91,32 @@ async def image_generate(
 
     try:
         save_dir = output_dir.strip() or os.path.join(os.getcwd(), ".cliver", "generated-images")
+        logger.info(
+            "Image generation — model=%s output_dir=%s prompt_length=%d",
+            mc.api_model_name,
+            save_dir,
+            len(prompt),
+        )
         response = await agent_core.generate(prompt=prompt, media_type="image", output_dir=save_dir)
 
+        header = f"Model: {mc.api_model_name} Saved to: {save_dir}\n"
+
         if not response.media:
-            return [{"text": response.message.text or "Image generation completed but no media was returned."}]
+            detail = response.message.text or "Image generation completed but no media was returned."
+            return [{"text": header + detail}]
 
         paths = [m.saved_path or m.data for m in response.media]
-        return [{"text": f"Generated {len(paths)} image(s):\n" + "\n".join(paths)}]
+        summary = header + f"Generated {len(paths)} image(s):\n" + "\n".join(paths)
+        return [{"text": summary}]
 
     except Exception as e:
         logger.warning("Image generation failed: %s", e)
         return [{"error": f"Error generating image: {e}"}]
+    finally:
+        # Close the provider to release httpx connections.
+        # Without this, the AsyncOpenAI client's connection pool is garbage-collected
+        # after the event loop closes → RuntimeError('Event loop is closed').
+        try:
+            await provider.close()
+        except Exception as close_err:
+            logger.debug("Error closing image provider: %s", close_err)

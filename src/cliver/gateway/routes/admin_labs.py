@@ -248,6 +248,9 @@ def get_lab_routes(lab_store, context: dict, require_auth: Callable) -> list:
 
         conversation_history = None
         model = body.get("model") or gateway._get_default_model_name()
+        image_model = body.get("image_model") or None
+        audio_model = body.get("audio_model") or None
+        video_model = body.get("video_model") or None
         system_message = body.get("system_message")
         agent_name = body.get("agent", "").strip()
         raw_history = body.get("conversation_history") or []
@@ -305,6 +308,12 @@ def get_lab_routes(lab_store, context: dict, require_auth: Callable) -> list:
                 session_options["agent"] = agent_name
             if model:
                 session_options["model"] = model
+            if image_model:
+                session_options["image_model"] = image_model
+            if audio_model:
+                session_options["audio_model"] = audio_model
+            if video_model:
+                session_options["video_model"] = video_model
             if system_message:
                 session_options["system_prompt"] = system_message
             if tool_names:
@@ -332,7 +341,7 @@ def get_lab_routes(lab_store, context: dict, require_auth: Callable) -> list:
             conversation_history = _build_history(raw_history)
 
         def _extra_system_prompt() -> str | None:
-            """Build extra system prompt content (persona, MCPs, server mode).
+            """Build extra system prompt content (persona, MCPs, server mode, model overrides).
 
             The builtin prompt (models, tools, self-awareness) is generated
             automatically by create_agent_core — we only add runtime context.
@@ -344,6 +353,20 @@ def get_lab_routes(lab_store, context: dict, require_auth: Callable) -> list:
                 parts.append(system_message)
             if mcp_server_names:
                 parts.append("## Linked MCP Servers\n\n" + "\n".join(f"- **{name}**" for name in mcp_server_names))
+            # Model overrides for tool calls
+            model_hints = []
+            if image_model:
+                model_hints.append(f"- **Image generation model:** `{image_model}`")
+            if audio_model:
+                model_hints.append(f"- **Audio generation model:** `{audio_model}`")
+            if video_model:
+                model_hints.append(f"- **Video generation model:** `{video_model}`")
+            if model_hints:
+                parts.append(
+                    "## Model Overrides\n\n"
+                    "When calling generation tools, use the following models "
+                    "unless the user explicitly requests a different one:\n\n" + "\n".join(model_hints)
+                )
             parts.append(
                 "\n## Server Mode\n\n"
                 "You are running as a backend API service via the admin portal. "

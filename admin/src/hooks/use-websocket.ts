@@ -1,13 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { WsMessageSchema, type WsMessage } from "@/lib/schemas";
 
-export interface WsMessage {
-  type: "status" | "chunk" | "done" | "error";
-  text?: string;
-  status?: string;
-  outputs?: Record<string, unknown>;
-  message?: string;
-  duration_ms?: number;
-}
+export type { WsMessage };
 
 export function useWebSocket(
   url: string | null,
@@ -44,13 +38,14 @@ export function useWebSocket(
     };
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as WsMessage;
+        const raw = JSON.parse(event.data);
+        const data = WsMessageSchema.parse(raw);
         setLastMessage(data);
         // Call onMessage synchronously from the event handler to avoid
         // React batching dropping intermediate messages.
         onMessageRef.current?.(data);
       } catch {
-        // ignore non-JSON messages
+        // ignore non-JSON or invalid messages
       }
     };
 

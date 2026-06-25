@@ -16,6 +16,7 @@ import { useConversation } from "@/hooks/use-conversations";
 import { useAgents, useSkills, useTemplates } from "@/hooks/use-api";
 import { ConversationSidebar } from "@/components/chat/ConversationSidebar";
 import { useTranslation } from "@/i18n";
+import { SessionOptionsSchema } from "@/lib/schemas";
 
 function generateId(): string {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -80,10 +81,12 @@ export default function ChatPage() {
     if (lastLoadedSessionId.current === dataId) return;
     lastLoadedSessionId.current = dataId;
 
-    const opts = (conversationDetail?.session?.options as Record<string, unknown>) || {};
+    const opts = SessionOptionsSchema.parse(
+      (conversationDetail?.session?.options as Record<string, unknown>) || {},
+    );
     setSelectedAgent(String(opts.agent || ""));
     setSystemMessage(String(opts.system_prompt || ""));
-    setSelectedSkills(Array.isArray(opts.skills) ? (opts.skills as string[]) : []);
+    setSelectedSkills(opts.skills ?? []);
   }, [activeConversationId, conversationDetail]);
 
   // Clear load tracker when leaving a conversation so returning reloads
@@ -601,7 +604,7 @@ function ComposerConfigPanel({
   }, []);
 
   const agentList: string[] = agents
-    ? (agents as unknown as Array<Record<string, unknown>>).map((a) => a.name as string).filter(Boolean)
+    ? agents.map((a) => a.name).filter(Boolean)
     : [];
   const skillList: string[] = skills
     ? (skills as Array<Record<string, unknown>>).map((s) => s.name as string).filter(Boolean)

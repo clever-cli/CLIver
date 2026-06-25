@@ -132,7 +132,8 @@ class ModelNameType(click.ParamType):
         try:
             cliver_obj = ctx.find_object(Cliver)
             if cliver_obj:
-                models = cliver_obj.config_manager.list_llm_models()
+                # Only suggest text models — non-text models can't be default
+                models = cliver_obj.config_manager.list_text_models()
                 return [click.shell_completion.CompletionItem(n) for n in models if n.startswith(incomplete)]
         except Exception:
             pass
@@ -140,8 +141,10 @@ class ModelNameType(click.ParamType):
 
 
 def _set_default_model(cliver: Cliver, name: str = None):
-    """Set or show the default LLM model."""
+    """Set or show the default LLM model (text models only)."""
     config_manager = cliver.config_manager
+    text_models = config_manager.list_text_models()
+
     if not name:
         default = config_manager.get_llm_model()
         if default:
@@ -149,18 +152,27 @@ def _set_default_model(cliver: Cliver, name: str = None):
         else:
             cliver.output("No default model set.")
 
-        models = config_manager.list_llm_models()
-        if models:
-            cliver.output(f"Available models: {', '.join(models.keys())}")
+        if text_models:
+            cliver.output(f"Available models: {', '.join(text_models.keys())}")
+        return
+
+    # Validate that the model exists and is a text model
+    mc = text_models.get(name)
+    if mc is None:
+        # Try resolving by suffix across all models to give a precise error
+        resolved, _ = _resolve_model(config_manager, name)
+        if resolved and resolved.category != "text":
+            cliver.output(f"Model '{name}' is a '{resolved.category}' model. Only text models can be set as default.")
+        else:
+            cliver.output(f"Model '{name}' not found.")
+            if text_models:
+                cliver.output(f"Available text models: {', '.join(text_models.keys())}")
         return
 
     if config_manager.set_default_model(name):
         cliver.output(f"Default model set to: {name}")
     else:
-        cliver.output(f"Model '{name}' not found.")
-        models = config_manager.list_llm_models()
-        if models:
-            cliver.output(f"Available models: {', '.join(models.keys())}")
+        cliver.output(f"Failed to set default model to '{name}'.")
 
 
 def _remove_model(cliver: Cliver, name: str):

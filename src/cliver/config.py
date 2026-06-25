@@ -36,7 +36,9 @@ class ProviderConfig(BaseModel):
 
     name: str
     type: str = Field(default="openai", description="API protocol: openai (OpenAI-compatible) or anthropic")
-    api_url: str = Field(description="Base URL for the provider API")
+    api_url: Optional[str] = Field(
+        default=None, description="Base URL for the provider API (falls back to provider default)"
+    )
     api_key: Optional[str] = Field(default=None, description="API key (supports Jinja2 templates)")
     rate_limit: Optional[RateLimitConfig] = Field(default=None, description="Rate limit for API calls")
     pricing: Optional[PricingConfig] = Field(default=None, description="Token pricing for cost tracking")
@@ -613,6 +615,10 @@ class ConfigManager:
     def list_llm_models(self) -> Dict[str, ModelConfig]:
         """List all LLM Models (flat dict)."""
         return self.all_models()
+
+    def list_text_models(self) -> Dict[str, ModelConfig]:
+        """List only text-category models (excludes image, audio, video)."""
+        return {k: v for k, v in self.all_models().items() if v.category == "text"}
 
     def add_or_update_llm_model(
         self,

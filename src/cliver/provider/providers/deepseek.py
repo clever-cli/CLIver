@@ -16,7 +16,15 @@ class DeepSeekProvider(_EngineProvider):
     """
 
     supported_protocols = ["openai", "anthropic"]
-    default_base_url = "https://api.deepseek.com/v1"
+
+    # DeepSeek's Anthropic-compatible endpoint uses Bearer auth (same as OpenAI),
+    # not Anthropic's native x-api-key header.
+    _anthropic_use_bearer_auth = True
+
+    _default_base_urls: dict[str, str] = {
+        "openai": "https://api.deepseek.com/v1",
+        "anthropic": "https://api.deepseek.com/anthropic",
+    }
 
     def msg_to_native(self, msg: CLIverMessage) -> dict:
         native = self.engine.msg_to_native(msg)

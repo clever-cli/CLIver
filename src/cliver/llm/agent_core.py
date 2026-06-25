@@ -415,7 +415,7 @@ class AgentCore:
                     event=ToolEventType.END,
                     tool_name=tc.name,
                     tool_call_id=tc.id,
-                    result=_truncate(str(result), 500),
+                    result=_truncate(self._format_tool_result(result), 500),
                     duration_ms=duration,
                 )
             )
