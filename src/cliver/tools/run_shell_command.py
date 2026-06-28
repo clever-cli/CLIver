@@ -6,6 +6,7 @@ import subprocess
 from typing import Optional
 
 from cliver.tool import tool
+from cliver.util import _safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,8 @@ def run_shell_command(
         directory: Optional absolute path to run the command in.
             If not provided, the current working directory is used.
     """
-    timeout_ms = min(timeout or DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
+    timeout_ms = _safe_int(timeout, DEFAULT_TIMEOUT_MS)
+    timeout_ms = min(timeout_ms, MAX_TIMEOUT_MS)
     timeout_s = timeout_ms / 1000.0
 
     system = platform.system()

@@ -6,6 +6,7 @@ import subprocess
 from typing import Optional
 
 from cliver.tool import tool
+from cliver.util import _safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def docker_run(
     if not rt:
         return [{"error": "No container runtime found. Install Docker, Podman, or nerdctl."}]
 
-    timeout_s = min(timeout or DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S)
+    timeout_s = min(_safe_int(timeout, DEFAULT_TIMEOUT_S), MAX_TIMEOUT_S)
 
     # Build the command
     cmd = [rt, "run", "--rm"]

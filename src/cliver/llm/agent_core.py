@@ -56,6 +56,7 @@ class AgentCore:
         on_event: EventHandler | None = None,
         max_consecutive_errors: int = _MAX_CONSECUTIVE_ERRORS,
         builtin_system_prompt: str | None = None,
+        logger: logging.Logger | None = None,
     ):
         self.provider = provider
         self.model = model
@@ -64,6 +65,7 @@ class AgentCore:
         self.on_event = on_event
         self.max_consecutive_errors = max_consecutive_errors
         self._builtin_system_prompt = builtin_system_prompt
+        self.logger = logger or logging.getLogger(__name__)
 
     # ── Public API ────────────────────────────────────────────
 
@@ -422,7 +424,7 @@ class AgentCore:
             return result
         except Exception as e:
             duration = (time.monotonic() - start) * 1000
-            logger.warning("Tool '%s' failed: %s", tc.name, e)
+            self.logger.warning("Tool '%s' failed: %s", tc.name, e)
             await self._emit(
                 ToolEvent(
                     event=ToolEventType.ERROR,

@@ -97,8 +97,28 @@ def get_session_routes(context: dict, require_auth: Callable) -> list:
             return JSONResponse({"status": "deleted"})
         return JSONResponse({"error": "session not found"}, status_code=404)
 
+    @require_auth
+    async def handle_delete_turn(request: Request):
+        sm = _get_session_manager(context)
+        if not sm:
+            return JSONResponse({"error": "Session manager not available"}, status_code=503)
+        session_id = request.path_params["id"]
+        try:
+            turn_id = int(request.path_params["turn_id"])
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "Invalid turn_id"}, status_code=400)
+        try:
+            deleted = sm.delete_turn(session_id, turn_id)
+        except Exception as e:
+            logger.warning("Failed to delete turn: %s", e)
+            return JSONResponse({"error": "Failed to delete turn"}, status_code=500)
+        if not deleted:
+            return JSONResponse({"error": "Turn not found"}, status_code=404)
+        return JSONResponse({"status": "deleted"})
+
     return [
         Route("/admin/api/sessions", handle_list_sessions),
         Route("/admin/api/sessions/{id}", handle_get_turns),
         Route("/admin/api/sessions/{id}", handle_delete_session, methods=["DELETE"]),
+        Route("/admin/api/sessions/{id}/turns/{turn_id}", handle_delete_turn, methods=["DELETE"]),
     ]

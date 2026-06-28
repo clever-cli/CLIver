@@ -1,5 +1,6 @@
 """Provider interface and request/response models."""
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
@@ -78,7 +79,7 @@ class Provider(MessageConverter):
                     f"not an empty list"
                 )
 
-    def __init__(self, protocol: str, api_key: str, base_url: str):
+    def __init__(self, protocol: str, api_key: str, base_url: str, *, logger: "logging.Logger | None" = None):
         if protocol not in self.supported_protocols:
             raise ValueError(
                 f"Provider '{self.provider_name()}' does not support protocol '{protocol}'. "
@@ -87,6 +88,7 @@ class Provider(MessageConverter):
         self.protocol = protocol
         self.api_key = api_key
         self.base_url = base_url
+        self.logger = logger or logging.getLogger(__name__)
 
     @classmethod
     def provider_name(cls) -> str:
@@ -218,14 +220,11 @@ class Provider(MessageConverter):
         Providers that use SDK-based generation (e.g. OpenAIEngine)
         should override ``generate()`` instead of using this method.
         """
-        import logging as _logging
         from pathlib import Path
 
         import httpx
 
         from cliver.messages import CLIverMessage
-
-        _logger = _logging.getLogger(__name__)
 
         url = self._resolve_media_gen_url(media_type)
         if not url:
@@ -247,11 +246,18 @@ class Provider(MessageConverter):
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(url, json=body, headers=headers)
                 data = resp.json()
+                self.logger.info(
+                    "%s %s response received — status=%d, \n body=%s",
+                    self.provider_name(),
+                    media_type,
+                    resp.status_code,
+                    json.dumps(data, ensure_ascii=False)[:1000],
+                )
 
             if not resp.is_success:
                 err_msg = data.get("msg") or data.get("error", {}).get("message", resp.text)
                 code = data.get("code") or resp.status_code
-                _logger.warning(
+                self.logger.warning(
                     "%s %s API error: code=%s detail=%s",
                     self.provider_name(),
                     media_type,
@@ -265,7 +271,7 @@ class Provider(MessageConverter):
                     ),
                 )
         except httpx.TimeoutException:
-            _logger.warning("%s %s API timeout: url=%s", self.provider_name(), media_type, url)
+            self.logger.warning("%s %s API timeout: url=%s", self.provider_name(), media_type, url)
             return CLIverResponse(
                 message=CLIverMessage(
                     role="assistant",
@@ -273,7 +279,7 @@ class Provider(MessageConverter):
                 ),
             )
         except httpx.HTTPStatusError as e:
-            _logger.warning("%s %s HTTP error: %s", self.provider_name(), media_type, e)
+            self.logger.warning("%s %s HTTP error: %s", self.provider_name(), media_type, e)
             return CLIverResponse(
                 message=CLIverMessage(
                     role="assistant",
@@ -281,7 +287,7 @@ class Provider(MessageConverter):
                 ),
             )
         except Exception as e:
-            _logger.warning("%s %s generation failed: %s", self.provider_name(), media_type, e)
+            self.logger.warning("%s %s generation failed: %s", self.provider_name(), media_type, e)
             return CLIverResponse(
                 message=CLIverMessage(
                     role="assistant",
@@ -293,7 +299,7 @@ class Provider(MessageConverter):
         # (e.g. MiniMax returns HTTP 200 with base_resp.status_code ≠ 0).
         err = self._check_media_response_error(data, media_type)
         if err:
-            _logger.warning(
+            self.logger.warning(
                 "%s %s API error: %s",
                 self.provider_name(),
                 media_type,
@@ -310,7 +316,7 @@ class Provider(MessageConverter):
         raw_items = self._extract_media_items(data, media_type)
 
         if not raw_items:
-            _logger.warning(
+            self.logger.warning(
                 "%s %s returned no media items. Raw response: %s",
                 self.provider_name(),
                 media_type,

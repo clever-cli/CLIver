@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useSessionTurns, useDeleteSession } from "@/hooks/use-api";
+import { apiDelete } from "@/lib/api";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   ArrowLeft, Trash2, User, Bot, Wrench, Brain, ChevronDown, ChevronRight, Image as ImageIcon,
@@ -21,6 +23,7 @@ interface TurnMessage {
 }
 
 interface TurnData {
+  id?: number;
   role: string;
   content: string;
   timestamp?: string;
@@ -99,6 +102,7 @@ function MediaBlock({ media, sessionSource, sessionId }: {
 }
 
 function ProviderDataPanel({ vendorExt }: { vendorExt?: Record<string, unknown> }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const trace = vendorExt?.__llm_trace__ as Array<Record<string, unknown>> | undefined;
   if (!trace || trace.length === 0) return null;
@@ -110,7 +114,7 @@ function ProviderDataPanel({ vendorExt }: { vendorExt?: Record<string, unknown> 
         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
       >
         {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-        Provider Communication ({trace.length} iteration{trace.length > 1 ? "s" : ""})
+        {t("trace.providerCommunication", { count: trace.length, plural: trace.length > 1 ? "s" : "" })}
       </button>
       {open && (
         <div className="mt-2 space-y-2">
@@ -124,6 +128,7 @@ function ProviderDataPanel({ vendorExt }: { vendorExt?: Record<string, unknown> 
 }
 
 function IterationDetail({ iteration, index }: { iteration: Record<string, unknown>; index: number }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const model = iteration.model as string;
   const provider = iteration.provider as string;
@@ -138,20 +143,20 @@ function IterationDetail({ iteration, index }: { iteration: Record<string, unkno
         className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-accent/50 transition-colors rounded-md text-left"
       >
         {open ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
-        <Badge variant="secondary" className="text-[10px]">Iteration {index + 1}</Badge>
+        <Badge variant="secondary" className="text-[10px]">{t("trace.iteration", { n: index + 1 })}</Badge>
         <span className="text-muted-foreground">{model}</span>
         {provider && <span className="text-muted-foreground">({provider})</span>}
       </button>
       {open && (
         <div className="px-2 pb-2 space-y-1.5">
           {request != null && (
-            <JsonBlock label="Request" data={request} />
+            <JsonBlock label={t("trace.request")} data={request} />
           )}
           {response != null && (
-            <JsonBlock label="Raw Response" data={response} />
+            <JsonBlock label={t("trace.rawResponse")} data={response} />
           )}
           {message != null && (
-            <JsonBlock label="Parsed Message" data={message} />
+            <JsonBlock label={t("trace.parsedMessage")} data={message} />
           )}
         </div>
       )}
@@ -181,7 +186,8 @@ function JsonBlock({ label, data }: { label: string; data: unknown }) {
   );
 }
 
-function TurnCard({ turn, sessionId }: { turn: TurnData; sessionId?: string }) {
+function TurnCard({ turn, sessionId, onDelete }: { turn: TurnData; sessionId?: string; onDelete?: () => void }) {
+  const { t } = useTranslation();
   const isUser = turn.role === "user";
   const isTool = turn.role === "tool";
   const msg = turn.message;
@@ -192,7 +198,7 @@ function TurnCard({ turn, sessionId }: { turn: TurnData; sessionId?: string }) {
 
   if (isTool) {
     return (
-      <Card className="border-l-4 border-l-amber-500/50">
+      <Card className="border-l-4 border-l-amber-500/50 group relative">
         <CardContent className="pt-3 pb-3">
           <div className="flex items-start gap-3">
             <div className="flex items-center justify-center w-7 h-7 rounded-full shrink-0 mt-0.5 bg-amber-500/10 text-amber-600">
@@ -209,13 +215,23 @@ function TurnCard({ turn, sessionId }: { turn: TurnData; sessionId?: string }) {
               </pre>
             </div>
           </div>
+          {onDelete && (
+            <button
+              type="button"
+              className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity"
+              onClick={onDelete}
+              title={t("chat.deleteTurn")}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive transition-colors" />
+            </button>
+          )}
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card className={cn(isUser ? "border-l-4 border-l-primary" : "")}>
+    <Card className={cn(isUser ? "border-l-4 border-l-primary" : "", "group relative")}>
       <CardContent className="pt-4">
         <div className="flex items-start gap-3">
           <div className={cn(
@@ -236,6 +252,16 @@ function TurnCard({ turn, sessionId }: { turn: TurnData; sessionId?: string }) {
             {!isUser && <ProviderDataPanel vendorExt={vendorExt} />}
           </div>
         </div>
+        {onDelete && (
+          <button
+            type="button"
+            className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity"
+            onClick={onDelete}
+            title={t("chat.deleteTurn")}
+          >
+            <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive transition-colors" />
+          </button>
+        )}
       </CardContent>
     </Card>
   );
@@ -249,11 +275,26 @@ export default function SessionDetailPage() {
   const navigate = useNavigate();
   const { data: turns, isLoading } = useSessionTurns(id!);
   const deleteSession = useDeleteSession();
+  const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function handleDelete() {
     await deleteSession.mutateAsync(id!);
     navigate("/admin/sessions");
+  }
+
+  // -- Turn deletion --
+  const [turnToDelete, setTurnToDelete] = useState<number | null>(null);
+
+  async function handleDeleteTurn() {
+    if (turnToDelete == null || !id) return;
+    try {
+      await apiDelete(`/sessions/${encodeURIComponent(id)}/turns/${turnToDelete}`);
+    } catch {
+      // Continue even if API fails
+    }
+    queryClient.invalidateQueries({ queryKey: ["session-turns", id] });
+    setTurnToDelete(null);
   }
 
   return (
@@ -287,10 +328,24 @@ export default function SessionDetailPage() {
       {turns && turns.length > 0 && (
         <div className="space-y-3">
           {(turns as TurnData[]).map((turn, i) => (
-            <TurnCard key={i} turn={turn} sessionId={id} />
+            <TurnCard
+              key={i}
+              turn={turn}
+              sessionId={id}
+              onDelete={turn.id != null ? () => setTurnToDelete(turn.id!) : undefined}
+            />
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={turnToDelete !== null}
+        title={t("chat.deleteTurn")}
+        description={t("chat.deleteTurnConfirm")}
+        destructive
+        onConfirm={handleDeleteTurn}
+        onCancel={() => setTurnToDelete(null)}
+      />
     </div>
   );
 }

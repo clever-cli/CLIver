@@ -6,6 +6,7 @@ Brand-specific behavior is added via hook overrides.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, AsyncIterator
 
 from cliver.messages import CLIverMessage, CLIverMessageChunk
@@ -24,8 +25,16 @@ class _EngineProvider(Provider):
     filter_options) for brand-specific behavior.
     """
 
-    def __init__(self, protocol: str, api_key: str, base_url: str, user_agent: str | None = None):
-        super().__init__(protocol, api_key, base_url)
+    def __init__(
+        self,
+        protocol: str,
+        api_key: str,
+        base_url: str,
+        user_agent: str | None = None,
+        *,
+        logger: "logging.Logger | None" = None,
+    ):
+        super().__init__(protocol, api_key, base_url, logger=logger)
         use_bearer = getattr(self.__class__, "_anthropic_use_bearer_auth", False)
         self.engine: ProtocolEngine = create_engine(
             protocol,
@@ -213,6 +222,7 @@ def create_provider(
     provider_class: type[Provider] | None = None,
     provider_name: str | None = None,
     user_agent: str | None = None,
+    logger: "logging.Logger | None" = None,
 ) -> Provider:
     """Create a Provider instance.
 
@@ -230,6 +240,8 @@ def create_provider(
         provider_name: Provider config name (e.g. ``"deepseek"``, ``"minimax"``).
             Used to look up the correct provider class when *base_url* is empty.
         user_agent: Optional User-Agent header.
+        logger: Optional logger for this provider.  When provided, all log
+            output from the provider is routed through this logger.
 
     Returns:
         A Provider instance ready to use.
@@ -249,4 +261,4 @@ def create_provider(
     if not url:
         url = resolve_base_url(protocol=protocol, provider_cls=cls)
 
-    return cls(api_key=api_key, base_url=url, protocol=protocol, user_agent=user_agent)
+    return cls(api_key=api_key, base_url=url, protocol=protocol, user_agent=user_agent, logger=logger)

@@ -50,7 +50,16 @@
     "justNow": "刚刚",
     "minutesAgo": "{count}分钟前",
     "hoursAgo": "{count}小时前",
-    "daysAgo": "{count}天前"
+    "daysAgo": "{count}天前",
+    "deleteTurn": "删除消息",
+    "deleteTurnConfirm": "确定要删除这条消息吗？此操作不可撤销。"
+  },
+  "trace": {
+    "providerCommunication": "提供者通信（{count} 次迭代）",
+    "iteration": "第 {n} 次迭代",
+    "request": "请求",
+    "rawResponse": "原始响应",
+    "parsedMessage": "解析后的消息"
   },
   "theme": {
     "switchToLight": "切换到浅色模式",

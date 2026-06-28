@@ -279,6 +279,20 @@ def _truncate(text: str, max_chars: int) -> str:
     return text
 
 
+def _safe_int(value, default: int) -> int:
+    """Convert value to int, returning default on failure.
+
+    Handles strings, floats, and ints.  Returns *default* when conversion
+    fails or the value is None/falsy.
+    """
+    if not value:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def read_context_files(
     base_path: str = ".",
     file_filter: list[str] = None,

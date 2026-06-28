@@ -11,6 +11,7 @@ export interface Conversation {
 }
 
 export interface ConversationTurn {
+  id: number;
   role: "user" | "assistant";
   content: string;
   timestamp?: string;

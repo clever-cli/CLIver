@@ -10,12 +10,14 @@ import {
   type AppendMessage,
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
-import { ArrowUp, Plus, Square, X } from "lucide-react";
+import { ArrowUp, Plus, Square, X, Trash2 } from "lucide-react";
 import { streamChat, type ChatArtifact } from "@/lib/chat-stream";
 import { useConversation } from "@/hooks/use-conversations";
 import { useAgents, useSkills, useTemplates } from "@/hooks/use-api";
 import { ConversationSidebar } from "@/components/chat/ConversationSidebar";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useTranslation } from "@/i18n";
+import { apiDelete } from "@/lib/api";
 import { SessionOptionsSchema } from "@/lib/schemas";
 
 function generateId(): string {
@@ -45,6 +47,7 @@ export default function ChatPage() {
   const [artifactMessageId, setArtifactMessageId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const loadedConversationIds = useRef<Set<string>>(new Set());
+  const turnDbIdByMsgId = useRef<Record<string, number>>({});
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
 
   const messages = activeConversationId
@@ -143,9 +146,14 @@ export default function ChatPage() {
       if (dataId && dataId !== activeConversationId) return;
       if (loadedConversationIds.current.has(activeConversationId)) return;
       loadedConversationIds.current.add(activeConversationId);
+      const msgs = conversationDetail.turns.map((turn) => {
+        const msg = convertTurnToMessage(turn);
+        turnDbIdByMsgId.current[msg.id] = turn.id;
+        return msg;
+      });
       setMessagesByConv((prev) => ({
         ...prev,
-        [activeConversationId]: conversationDetail.turns.map(convertTurnToMessage),
+        [activeConversationId]: msgs,
       }));
     } else if (!activeConversationId) {
       setError(null);
@@ -213,6 +221,33 @@ export default function ChatPage() {
     },
     [activeConversationId, navigate, queryClient],
   );
+
+  // -- Turn deletion --
+  const [turnToDelete, setTurnToDelete] = useState<{ msgId: string } | null>(null);
+
+  const handleDeleteTurn = useCallback(async () => {
+    if (!turnToDelete || !activeConversationId) return;
+    const dbTurnId = turnDbIdByMsgId.current[turnToDelete.msgId];
+    if (dbTurnId == null) return;
+
+    try {
+      await apiDelete(
+        `/conversations/${encodeURIComponent(activeConversationId)}/turns/${dbTurnId}`,
+      );
+    } catch {
+      // If the API call fails, still remove from local state for responsiveness
+    }
+
+    setMessagesByConv((prev) => ({
+      ...prev,
+      [activeConversationId]: (prev[activeConversationId] || []).filter(
+        (m) => m.id !== turnToDelete.msgId,
+      ),
+    }));
+    delete turnDbIdByMsgId.current[turnToDelete.msgId];
+    queryClient.invalidateQueries({ queryKey: ["conversation", activeConversationId] });
+    setTurnToDelete(null);
+  }, [turnToDelete, activeConversationId, queryClient]);
 
   const onNew = useCallback(
     async (message: AppendMessage) => {
@@ -406,7 +441,7 @@ export default function ChatPage() {
                         }`}
                       >
                         <div
-                          className={`message-bubble ${
+                          className={`message-bubble group relative ${
                             message.role === "user"
                               ? "message-bubble-user"
                               : "message-bubble-assistant"
@@ -440,6 +475,17 @@ export default function ChatPage() {
                               ))}
                             </div>
                           )}
+                          <button
+                            type="button"
+                            className="absolute top-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTurnToDelete({ msgId: message.id as string });
+                            }}
+                            title={t("chat.deleteTurn")}
+                          >
+                            <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive transition-colors" />
+                          </button>
                         </div>
                       </div>
                     )}
@@ -558,6 +604,15 @@ export default function ChatPage() {
             </div>
           </ThreadPrimitive.Root>
         </AssistantRuntimeProvider>
+
+        <ConfirmDialog
+          open={turnToDelete !== null}
+          title={t("chat.deleteTurn")}
+          description={t("chat.deleteTurnConfirm")}
+          destructive
+          onConfirm={handleDeleteTurn}
+          onCancel={() => setTurnToDelete(null)}
+        />
       </main>
     </div>
   );

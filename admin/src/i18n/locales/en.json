@@ -50,7 +50,16 @@
     "justNow": "Just now",
     "minutesAgo": "{count}m ago",
     "hoursAgo": "{count}h ago",
-    "daysAgo": "{count}d ago"
+    "daysAgo": "{count}d ago",
+    "deleteTurn": "Delete turn",
+    "deleteTurnConfirm": "Delete this message? This cannot be undone."
+  },
+  "trace": {
+    "providerCommunication": "Provider Communication ({count} iteration{plural})",
+    "iteration": "Iteration {n}",
+    "request": "Request",
+    "rawResponse": "Raw Response",
+    "parsedMessage": "Parsed Message"
   },
   "theme": {
     "switchToLight": "Switch to light mode",

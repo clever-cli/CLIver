@@ -13,6 +13,7 @@ import tempfile
 from typing import Optional
 
 from cliver.tool import tool
+from cliver.util import _safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ def execute_code(code: str, timeout: Optional[int] = None) -> list[dict]:
             library. Print results to stdout -- the output is returned to you.
         timeout: Timeout in seconds (max 300). Defaults to 30s.
     """
-    timeout_s = min(timeout or DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S)
+    timeout_s = min(_safe_int(timeout, DEFAULT_TIMEOUT_S), MAX_TIMEOUT_S)
 
     # Write code to a temp file (avoids shell escaping issues)
     try:

@@ -61,6 +61,21 @@ def get_conversations_routes(context: dict, require_auth: Callable) -> list:
         return JSONResponse({"status": "deleted"})
 
     @require_auth
+    async def handle_delete_turn(request: Request):
+        session_manager = context.get("cli_session_manager")
+        if not session_manager:
+            return JSONResponse({"error": "Session manager not available"}, status_code=503)
+        session_id = request.path_params["id"]
+        try:
+            turn_id = int(request.path_params["turn_id"])
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "Invalid turn_id"}, status_code=400)
+        deleted = await _run_in_thread(session_manager.delete_turn, session_id, turn_id)
+        if not deleted:
+            return JSONResponse({"error": "Turn not found"}, status_code=404)
+        return JSONResponse({"status": "deleted"})
+
+    @require_auth
     async def handle_update(request: Request):
         session_manager = context.get("cli_session_manager")
         if not session_manager:
@@ -81,4 +96,5 @@ def get_conversations_routes(context: dict, require_auth: Callable) -> list:
         Route("/admin/api/conversations/{id}", handle_get),
         Route("/admin/api/conversations/{id}", handle_delete, methods=["DELETE"]),
         Route("/admin/api/conversations/{id}", handle_update, methods=["PATCH"]),
+        Route("/admin/api/conversations/{id}/turns/{turn_id}", handle_delete_turn, methods=["DELETE"]),
     ]

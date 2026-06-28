@@ -76,6 +76,7 @@ def create_agent_core(
     config_manager: "ConfigManager | None" = None,
     on_event: "EventHandler | None" = None,
     max_consecutive_errors: int = 5,
+    logger: "logging.Logger | None" = None,
 ) -> "AgentCore":
     """Create an AgentCore from a model config.
 
@@ -92,6 +93,10 @@ def create_agent_core(
             returns True to include).
         on_event: Optional handler for ToolEvent/InferenceEvent callbacks.
         max_consecutive_errors: Max consecutive tool errors before stopping.
+        logger: Optional logger for this AgentCore instance.  When provided,
+            all log output from the agent and its provider is routed through
+            this logger (e.g. to a gateway or TUI log file).  Defaults to
+            ``logging.getLogger("cliver.llm.agent_core")``.
 
     Returns:
         A configured AgentCore ready for ``chat()`` / ``stream()``.
@@ -123,6 +128,7 @@ def create_agent_core(
         protocol=protocol,
         provider_name=model_config.provider,
         user_agent=user_agent,
+        logger=logger,
     )
 
     builtin_sp = build_system_prompt(
@@ -142,6 +148,7 @@ def create_agent_core(
         on_event=on_event,
         max_consecutive_errors=max_consecutive_errors,
         builtin_system_prompt=builtin_sp,
+        logger=logger,
     )
 
 

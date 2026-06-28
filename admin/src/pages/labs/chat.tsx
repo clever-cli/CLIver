@@ -10,7 +10,7 @@ import {
   type AppendMessage,
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
-import { ArrowUp, Square, Play, FileText, Brain, Package, ChevronDown, ChevronRight, X } from "lucide-react";
+import { ArrowUp, Square, Play, FileText, Brain, Package, ChevronDown, ChevronRight, X, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useLab, useLabGoldenTests, useRunGoldenTests, type TestRunResult } from "@/hooks/use-api";
 import { useConversation } from "@/hooks/use-conversations";
@@ -19,7 +19,9 @@ import { SessionOptionsSchema, type SessionOptions } from "@/lib/schemas";
 import { LabHeader } from "@/components/lab/LabHeader";
 import { LabConfigPanel } from "@/components/lab/LabConfigPanel";
 import { GoldenTestCard } from "@/components/lab/GoldenTestCard";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useTranslation } from "@/i18n";
+import { apiDelete } from "@/lib/api";
 
 function generateId(): string {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -47,6 +49,7 @@ function TraceJsonBlock({ label, data }: { label: string; data: unknown }) {
 }
 
 function TraceIteration({ iteration, index }: { iteration: Record<string, unknown>; index: number }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const model = iteration.model as string;
   const provider = iteration.provider as string;
@@ -57,15 +60,15 @@ function TraceIteration({ iteration, index }: { iteration: Record<string, unknow
         className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-accent/50 transition-colors rounded-md text-left"
       >
         {open ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
-        <Badge variant="secondary" className="text-[10px]">Iteration {index + 1}</Badge>
+        <Badge variant="secondary" className="text-[10px]">{t("trace.iteration", { n: index + 1 })}</Badge>
         <span className="text-muted-foreground">{model}</span>
         {provider && <span className="text-muted-foreground">({provider})</span>}
       </button>
       {open && (
         <div className="px-2 pb-2 space-y-1.5">
-          {iteration.request != null && <TraceJsonBlock label="Request" data={iteration.request} />}
-          {iteration.response != null && <TraceJsonBlock label="Raw Response" data={iteration.response} />}
-          {iteration.message != null && <TraceJsonBlock label="Parsed Message" data={iteration.message} />}
+          {iteration.request != null && <TraceJsonBlock label={t("trace.request")} data={iteration.request} />}
+          {iteration.response != null && <TraceJsonBlock label={t("trace.rawResponse")} data={iteration.response} />}
+          {iteration.message != null && <TraceJsonBlock label={t("trace.parsedMessage")} data={iteration.message} />}
         </div>
       )}
     </div>
@@ -101,6 +104,7 @@ export default function LabChatPage() {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const loadedSessionIds = useRef<Set<string>>(new Set());
+  const turnDbIdByMsgId = useRef<Record<string, number>>({});
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
 
   const messages = activeSessionId ? (messagesByConv[activeSessionId] || []) : [];
@@ -183,13 +187,18 @@ export default function LabChatPage() {
       if (dataId && dataId !== activeSessionId) return;
       if (loadedSessionIds.current.has(activeSessionId)) return;
       loadedSessionIds.current.add(activeSessionId);
-      setMessagesByConv((prev) => ({
-        ...prev,
-        [activeSessionId]: conversationDetail.turns.map((turn) => ({
-          id: generateId(),
+      const msgs = conversationDetail.turns.map((turn) => {
+        const msgId = generateId();
+        turnDbIdByMsgId.current[msgId] = turn.id;
+        return {
+          id: msgId,
           role: turn.role as "user" | "assistant",
           content: [{ type: "text" as const, text: turn.content }],
-        })),
+        };
+      });
+      setMessagesByConv((prev) => ({
+        ...prev,
+        [activeSessionId]: msgs,
       }));
     }
   }, [activeSessionId, conversationDetail, runningConvId]);
@@ -259,6 +268,33 @@ export default function LabChatPage() {
     abortRef.current = null;
     setRunningConvId(null);
   }, []);
+
+  // -- Turn deletion --
+  const [turnToDelete, setTurnToDelete] = useState<{ msgId: string } | null>(null);
+
+  const handleDeleteTurn = useCallback(async () => {
+    if (!turnToDelete || !activeSessionId) return;
+    const dbTurnId = turnDbIdByMsgId.current[turnToDelete.msgId];
+    if (dbTurnId == null) return;
+
+    try {
+      await apiDelete(
+        `/conversations/${encodeURIComponent(activeSessionId)}/turns/${dbTurnId}`,
+      );
+    } catch {
+      // Remove from local state even if API fails (optimistic)
+    }
+
+    setMessagesByConv((prev) => ({
+      ...prev,
+      [activeSessionId]: (prev[activeSessionId] || []).filter(
+        (m) => m.id !== turnToDelete.msgId,
+      ),
+    }));
+    delete turnDbIdByMsgId.current[turnToDelete.msgId];
+    queryClient.invalidateQueries({ queryKey: ["conversation", activeSessionId] });
+    setTurnToDelete(null);
+  }, [turnToDelete, activeSessionId, queryClient]);
 
   const onNew = useCallback(
     async (message: AppendMessage) => {
@@ -506,6 +542,17 @@ export default function LabChatPage() {
                               <Badge variant="outline" className="text-[9px] px-1 py-0">trace</Badge>
                             </div>
                           )}
+                          <button
+                            type="button"
+                            className="absolute bottom-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTurnToDelete({ msgId: message.id as string });
+                            }}
+                            title={t("chat.deleteTurn")}
+                          >
+                            <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive transition-colors" />
+                          </button>
                           </div>
                         </div>
                         );
@@ -519,7 +566,7 @@ export default function LabChatPage() {
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setInspectTrace(null)}>
                       <div className="bg-card rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-y-auto m-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between px-4 py-3 border-b sticky top-0 bg-card z-10">
-                          <h3 className="text-sm font-semibold">Provider Communication ({inspectTrace.length} iteration{inspectTrace.length > 1 ? "s" : ""})</h3>
+                          <h3 className="text-sm font-semibold">{t("trace.providerCommunication", { count: inspectTrace.length, plural: inspectTrace.length > 1 ? "s" : "" })}</h3>
                           <button onClick={() => setInspectTrace(null)} className="p-1 hover:bg-muted rounded">
                             <X className="w-4 h-4" />
                           </button>
@@ -640,6 +687,15 @@ export default function LabChatPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={turnToDelete !== null}
+        title={t("chat.deleteTurn")}
+        description={t("chat.deleteTurnConfirm")}
+        destructive
+        onConfirm={handleDeleteTurn}
+        onCancel={() => setTurnToDelete(null)}
+      />
     </div>
   );
 }

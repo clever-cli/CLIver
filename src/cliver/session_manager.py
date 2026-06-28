@@ -182,17 +182,17 @@ class SessionManager:
     def load_turns(self, session_id: str) -> List[Dict[str, str]]:
         """Load all conversation turns from a session.
 
-        Each turn dict has ``role``, ``content``, ``timestamp``, and
+        Each turn dict has ``id``, ``role``, ``content``, ``timestamp``, and
         optionally ``message`` (a ``CLIverMessage`` reconstructed from JSON).
         """
         with self._get_store().read() as db:
             rows = db.execute(
-                "SELECT role, content, message_json, timestamp FROM turns WHERE session_id = ? ORDER BY id",
+                "SELECT id, role, content, message_json, timestamp FROM turns WHERE session_id = ? ORDER BY id",
                 (session_id,),
             ).fetchall()
         result = []
         for r in rows:
-            turn = {"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]}
+            turn = {"id": r["id"], "role": r["role"], "content": r["content"], "timestamp": r["timestamp"]}
             if r["message_json"]:
                 try:
                     turn["message"] = CLIverMessage.model_validate_json(r["message_json"]).model_dump(exclude_none=True)
@@ -200,6 +200,26 @@ class SessionManager:
                     pass
             result.append(turn)
         return result
+
+    def delete_turn(self, session_id: str, turn_id: int) -> bool:
+        """Delete a single turn by its id.
+
+        Returns True if a turn was deleted, False if the turn was not found
+        or did not belong to the given session.
+        """
+        with self._get_store().write() as db:
+            cursor = db.execute(
+                "DELETE FROM turns WHERE id = ? AND session_id = ?",
+                (turn_id, session_id),
+            )
+            deleted = cursor.rowcount
+            if deleted > 0:
+                db.execute(
+                    "UPDATE sessions SET turn_count = (SELECT COUNT(*) FROM turns WHERE session_id = ?), "
+                    "updated_at = ? WHERE id = ?",
+                    (session_id, _timestamp(), session_id),
+                )
+        return deleted > 0
 
     def trim_turns(self, session_id: str, keep_last: int = 50) -> int:
         """Delete older turns, keeping only the most recent ones.
