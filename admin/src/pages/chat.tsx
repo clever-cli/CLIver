@@ -148,7 +148,7 @@ export default function ChatPage() {
       loadedConversationIds.current.add(activeConversationId);
       const msgs = conversationDetail.turns.map((turn) => {
         const msg = convertTurnToMessage(turn);
-        turnDbIdByMsgId.current[msg.id] = turn.id;
+        turnDbIdByMsgId.current[msg.id!] = turn.id;
         return msg;
       });
       setMessagesByConv((prev) => ({
